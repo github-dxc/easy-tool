@@ -1,0 +1,42 @@
+export component CloseButton inherits Rectangle {
+    // 组件属性
+    width: 16px;
+    height: 16px;
+    border-radius: 2px;
+    border-color: has-hover? #E5E5E5: #E7E7E7;
+    
+    // 点击区域
+    touch := TouchArea {
+        clicked => {
+            root.clicked();
+        };
+    }
+    
+    // 回调
+    callback clicked;
+    
+    // 内部状态
+    in-out property <bool> pressed: touch.pressed;
+    property <bool> has-hover: touch.has-hover;
+    
+    // 背景图片
+    Image {
+        source: @image-url("../icons/close.png");
+        width: 90%;
+        height: 90%;
+        image-fit: cover;
+        opacity: pressed ? 0.7 : 1.0;
+    }
+    
+    // 悬停特效
+    if has-hover: Rectangle {
+        width: 100%;
+        height: 100%;
+        border-radius: parent.border-radius;
+        background: #00000020;
+        
+        animate background {
+            duration: 150ms;
+        }
+    }
+}

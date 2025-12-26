@@ -1,0 +1,15 @@
+[package]
+name = "easy-tool"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+slint = "1.14.1"
+chrono = { version = "0.4", features = ["serde"] }
+chrono-tz = "0.10.3"
+rdev = "0.5.3"
+log = "0.4.27"
+flexi_logger = "0.23"
+
+[build-dependencies]
+slint-build = "1.14.1"

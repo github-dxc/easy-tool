@@ -1,0 +1,158 @@
+import { LineEdit, VerticalBox, ComboBox, Button } from "std-widgets.slint";
+import { CloseButton } from "components/close.slint";
+
+export component TimeTrans inherits Window {
+    no-frame: true;
+    always-on-top: true;
+    width: 240px;
+    height: 130px;
+
+    // 定义变量
+    in-out property <string> input_value: "2006-01-02 15:04:05";
+    in-out property <string> result_value: "2006-01-02 15:04:05";
+    in-out property <string> timestamp_unit: "s";
+    in-out property <int> timezone_index: 0;
+    property <[string]> timezones: [
+        "Asia/Shanghai",
+        "UTC",
+        "America/New_York",
+        "America/Los_Angeles",
+        "Europe/London",
+        "Asia/Tokyo"
+    ];
+    property <[string]> timezone_labels: [
+        "CST/+8",
+        "UTC/+0",
+        "EST/-5",
+        "PST/-8",
+        "GMT/+0",
+        "JST/+9"
+    ];
+    property <int> close_time: 10;
+    out property <bool> has-hover;
+
+    // 定义回调函数（rust函数）
+    callback update_result(input: string, unit: string, timezone: string);
+    callback copy_to_clipboard(text: string);
+    callback close_window();
+
+    // 值变更回调
+    changed input_value => {
+        update_result(root.input_value, root.timestamp_unit, root.timezones[root.timezone_index]);
+    }
+    changed timestamp_unit => {
+        update_result(root.input_value, root.timestamp_unit, root.timezones[root.timezone_index]);
+    }
+    changed timezone_index => {
+        update_result(root.input_value, root.timestamp_unit, root.timezones[root.timezone_index]);
+    }
+
+    // 定时器
+    timer := Timer {
+        interval: 1s;
+        running: true;
+        triggered() => {
+            if (!area.has-hover) {
+                close_time -= 1;
+                if (close_time == 0) {
+                    root.close_window();
+                    self.running = false;
+                }
+            }
+        }
+    }
+    // 触摸区
+    area := TouchArea {
+        width: root.width;
+        height: root.height;
+        enabled: true;
+    }
+
+    // 子组件内容
+    VerticalLayout {
+        padding: 5px;
+        spacing: 5px;
+
+        HorizontalLayout {
+            spacing: 2px;
+            VerticalBox {
+                LineEdit {
+                    placeholder-text: "输入时间戳或时间字符串";
+                    text <=> root.input_value;
+                }
+            }
+
+            CloseButton {
+                clicked => {
+                    root.close_window();
+                };
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 5px;
+
+            ComboBox {
+                width: 80px;
+                model: ["s", "ms"];
+                current-value <=> root.timestamp_unit;
+                // 选项变化时触发
+                selected(value) => {
+                    debug("选中了: " + value);
+                }
+            }
+
+            HorizontalLayout {
+                spacing: 2px;
+
+                Button {
+                    text: "<";
+                    clicked => {
+                        if root.timezone_index == 0 {
+                            root.timezone_index = root.timezones.length - 1;
+                        } else {
+                            root.timezone_index -= 1;
+                        }
+                    }
+                }
+
+                Text {
+                    text: timezone_labels[root.timezone_index];
+                    min-width: 70px;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+
+                Button {
+                    text: ">";
+                    clicked => {
+                        if root.timezone_index >= root.timezones.length - 1 {
+                            root.timezone_index = 0;
+                        } else {
+                            root.timezone_index += 1;
+                        }
+                    }
+                }
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 2px;
+
+            Text {
+                font-size: 16px;
+                text: root.result_value;
+                horizontal-stretch: 1;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+
+            Button {
+                text: "Copy";
+                enabled: root.result_value != "";
+                clicked => copy_to_clipboard(root.result_value);
+            }
+        }
+
+    }
+}

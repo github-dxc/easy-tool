@@ -1,0 +1,32 @@
+import { Button } from "std-widgets.slint";
+
+export component TestWindow inherits Window {
+    callback button-clicked();
+    in-out property<int> counter: 0;
+
+    title: "Main Window";
+    width: 600px;
+    height: 500px;
+    
+    Rectangle {
+        Text {
+            x: 270px;
+            y: 73px;
+            text: "点击次数: " + root.counter;
+            color: blue;
+            font-size: 16px;
+        }
+        
+        Button {
+            width: 134px;
+            x: 242px;
+            y: 137px;
+            height: 83px;
+            text: "点击我";
+            clicked => {
+                root.counter += 1;
+                root.button-clicked();
+            }
+        }
+    }
+}
