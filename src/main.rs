@@ -1,5 +1,5 @@
-use easy_tool::test_window;
+use easy_tool::*;
 
 fn main() {
-    test_window();
+    run();
 }

@@ -8,13 +8,6 @@ fn test_test_window() {
 }
 
 #[test]
-fn test_time_trans_window() {
-    time_trans_window();
-}
-
-#[test]
-fn test_listen_keybord_event() {
-    init_log().unwrap();
-    init_rdev(keybord_event_handle).unwrap();
-    sleep(Duration::from_secs(20));
+fn test_init_tray_icon() {
+    let _ti = init_tray_icon();
 }

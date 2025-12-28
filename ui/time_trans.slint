@@ -1,16 +1,16 @@
-import { LineEdit, VerticalBox, ComboBox, Button } from "std-widgets.slint";
+import { LineEdit, VerticalBox, ComboBox, Button, Switch } from "std-widgets.slint";
 import { CloseButton } from "components/close.slint";
 
 export component TimeTrans inherits Window {
     no-frame: true;
     always-on-top: true;
-    width: 240px;
-    height: 130px;
+    width: 210px;
+    height: 95px;
 
     // 定义变量
     in-out property <string> input_value: "2006-01-02 15:04:05";
     in-out property <string> result_value: "2006-01-02 15:04:05";
-    in-out property <string> timestamp_unit: "s";
+    in-out property <bool> timestamp_unit: false;
     in-out property <int> timezone_index: 0;
     property <[string]> timezones: [
         "Asia/Shanghai",
@@ -32,7 +32,7 @@ export component TimeTrans inherits Window {
     out property <bool> has-hover;
 
     // 定义回调函数（rust函数）
-    callback update_result(input: string, unit: string, timezone: string);
+    callback update_result(input: string, unit: bool, timezone: string);
     callback copy_to_clipboard(text: string);
     callback close_window();
 
@@ -70,12 +70,13 @@ export component TimeTrans inherits Window {
 
     // 子组件内容
     VerticalLayout {
-        padding: 5px;
-        spacing: 5px;
+        padding: 2px;
+        spacing: 2px;
 
         HorizontalLayout {
             spacing: 2px;
             VerticalBox {
+                padding: 2px;
                 LineEdit {
                     placeholder-text: "输入时间戳或时间字符串";
                     text <=> root.input_value;
@@ -90,22 +91,19 @@ export component TimeTrans inherits Window {
         }
 
         HorizontalLayout {
-            spacing: 5px;
+            spacing: 2px;
 
-            ComboBox {
-                width: 80px;
-                model: ["s", "ms"];
-                current-value <=> root.timestamp_unit;
-                // 选项变化时触发
-                selected(value) => {
-                    debug("选中了: " + value);
-                }
+            Switch {
+                width: 75px;
+                text: self.checked ? "ms" : "s";
+                checked <=> timestamp_unit;
             }
 
             HorizontalLayout {
                 spacing: 2px;
 
                 Button {
+                    height: 25px;
                     text: "<";
                     clicked => {
                         if root.timezone_index == 0 {
@@ -118,12 +116,13 @@ export component TimeTrans inherits Window {
 
                 Text {
                     text: timezone_labels[root.timezone_index];
-                    min-width: 70px;
+                    width: 50px;
                     horizontal-alignment: center;
                     vertical-alignment: center;
                 }
 
                 Button {
+                    height: 25px;
                     text: ">";
                     clicked => {
                         if root.timezone_index >= root.timezones.length - 1 {
@@ -141,6 +140,8 @@ export component TimeTrans inherits Window {
 
             Text {
                 font-size: 16px;
+                font-weight: 700;
+                color: blue;
                 text: root.result_value;
                 horizontal-stretch: 1;
                 horizontal-alignment: center;
@@ -148,6 +149,8 @@ export component TimeTrans inherits Window {
             }
 
             Button {
+                width: 55px;
+                height: 25px;
                 text: "Copy";
                 enabled: root.result_value != "";
                 clicked => copy_to_clipboard(root.result_value);
