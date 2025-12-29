@@ -15,6 +15,13 @@ log = "0.4.27"
 flexi_logger = "0.23"
 image = "0.24"
 tray-icon = "0.21.2"
+winit = "0.30.12"
+# 用于访问 winit 特性
+i-slint-backend-winit = "1.7"
+# 用于获取原始窗口句柄
+raw-window-handle = "0.6"
+# 用于调用 Windows 底层 API
+windows-sys = { version = "0.52", features = ["Win32_UI_WindowsAndMessaging"] }
 
 [build-dependencies]
 slint-build = "1.14.1"

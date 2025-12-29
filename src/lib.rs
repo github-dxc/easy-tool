@@ -1,12 +1,13 @@
 use chrono::{DateTime, TimeZone, Utc};
 use chrono_tz::Tz;
+use winit::dpi::LogicalPosition;
+use slint::ComponentHandle;
+use i_slint_backend_winit::WinitWindowAccessor;
+use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use tray_icon::{Icon, TrayIcon};
 use tray_icon::menu::MenuItem;
-use core::time;
-use std::os::windows;
 use std::sync::{Arc, Mutex};
 use std::thread::{self, sleep};
-use std::time::Duration;
 use rdev::{Event, listen};
 use rdev::EventType;
 use tray_icon::{TrayIconBuilder,TrayIconEvent, menu::{Menu,MenuEvent}};
@@ -22,22 +23,39 @@ pub fn run() {
     init_log().unwrap();
 
     // 初始化窗口
-    let _time_trans_window = init_time_trans_window();
+    let time_trans_window = init_time_trans_window();
+    let weak = time_trans_window.as_weak();
 
     // 初始化桌面托盘
     let (_tray_icon, _tray_menu) = init_tray_icon();
 
     // 初始化键盘事件监听
-    init_rdev(|event|{
-        if let Some(name) = event.name {
-            info!("event name: {:?}", name);
-        }
+    let mouse_x = Arc::new(Mutex::new(0f64));
+    let mouse_y = Arc::new(Mutex::new(0f64));
+    init_rdev(move |event|{
         match event.event_type {
             EventType::MouseMove{ x, y } => {
                 // 获取鼠标位置
                 info!("x:{},y:{}", x, y);
+                *mouse_x.lock().unwrap() = x;
+                *mouse_y.lock().unwrap() = y;
             }
             _ => {}
+        }
+        // 特殊处理按键事件
+        if let Some(name) = event.name {
+            info!("event name: {:?}", name);
+            match name.as_str() {
+                // 处理 Ctrl+C 组合键
+                "\u{3}" => {
+                    weak.clone().upgrade_in_event_loop(|window| {
+                        window.show().unwrap();
+                        // 设置窗口位置到鼠标位置
+                        set_pos_and_hide_taskbar(&window);
+                    }).expect("Failed to send event to UI thread")
+                }
+                _ => {}
+            }
         }
         Ok(())
     }).unwrap();
@@ -155,4 +173,39 @@ fn load_icon(path: &str) -> Icon {
     // 获取原始像素字节流
     let rgba = img.into_raw();
     Icon::from_rgba(rgba, width, height).expect("创建图标失败")
+}
+
+fn set_pos_and_hide_taskbar(window: &TimeTrans) {
+    // 隐藏窗口的任务栏图标（改进：清除 WS_EX_APPWINDOW，设置 WS_EX_TOOLWINDOW，并刷新样式）
+    #[cfg(target_os = "windows")]
+    {
+        // 访问底层的 winit 窗口
+        window.window().with_winit_window(|winit_window| {
+            // 设置位置
+            winit_window.set_outer_position(LogicalPosition::new(1000.0, 500.0));
+            // 获取原始句柄 (raw-window-handle 0.6 语法)
+            if let Ok(handle) = winit_window.window_handle() {
+                if let RawWindowHandle::Win32(win32_handle) = handle.as_raw() {
+                    let hwnd = win32_handle.hwnd.get() as isize;
+
+                    unsafe {
+                        use windows_sys::Win32::UI::WindowsAndMessaging::*;
+
+                        // 使用 Get/SetWindowLongPtr 更加安全（64 位兼容）
+                        let mut ex_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as isize;
+
+                        // 增加工具窗口样式，移除应用窗口样式（避免在任务栏显示）
+                        ex_style |= WS_EX_TOOLWINDOW as isize;
+                        ex_style &= !(WS_EX_APPWINDOW as isize);
+
+                        SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex_style);
+
+                        // 通知系统样式已改变，立即刷新窗口外观
+                        const SWP_FLAGS: u32 = SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER;
+                        SetWindowPos(hwnd, 0, 0, 0, 0, 0, SWP_FLAGS);
+                    }
+                }
+            }
+        });
+    }
 }

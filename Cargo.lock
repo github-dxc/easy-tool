@@ -1409,12 +1409,16 @@ dependencies = [
  "chrono",
  "chrono-tz",
  "flexi_logger",
+ "i-slint-backend-winit",
  "image 0.24.9",
  "log",
+ "raw-window-handle",
  "rdev",
  "slint",
  "slint-build",
  "tray-icon",
+ "windows-sys 0.52.0",
+ "winit",
 ]
 
 [[package]]
