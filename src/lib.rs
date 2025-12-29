@@ -36,7 +36,8 @@ pub fn run() {
         match event.event_type {
             EventType::MouseMove{ x, y } => {
                 // 获取鼠标位置
-                info!("x:{},y:{}", x, y);
+                // info!("x:{},y:{}", x, y);
+                
                 *mouse_x.lock().unwrap() = x;
                 *mouse_y.lock().unwrap() = y;
             }
@@ -48,10 +49,13 @@ pub fn run() {
             match name.as_str() {
                 // 处理 Ctrl+C 组合键
                 "\u{3}" => {
-                    weak.clone().upgrade_in_event_loop(|window| {
+                    let cur_x = *mouse_x.lock().unwrap();
+                    let cur_y = *mouse_y.lock().unwrap();
+                    weak.clone().upgrade_in_event_loop(move |window| {
                         window.show().unwrap();
                         // 设置窗口位置到鼠标位置
-                        set_pos_and_hide_taskbar(&window);
+                        info!("set window pos to x:{},y:{}", cur_x, cur_y);
+                        set_pos_and_hide_taskbar(&window, cur_x, cur_y);
                     }).expect("Failed to send event to UI thread")
                 }
                 _ => {}
@@ -81,7 +85,7 @@ pub fn run() {
             }
         }
     });
-    slint::run_event_loop().unwrap();
+    slint::run_event_loop_until_quit().unwrap();
 }
 
 pub fn test_window() {
@@ -175,14 +179,14 @@ fn load_icon(path: &str) -> Icon {
     Icon::from_rgba(rgba, width, height).expect("创建图标失败")
 }
 
-fn set_pos_and_hide_taskbar(window: &TimeTrans) {
+fn set_pos_and_hide_taskbar(window: &TimeTrans, x: f64, y: f64) {
     // 隐藏窗口的任务栏图标（改进：清除 WS_EX_APPWINDOW，设置 WS_EX_TOOLWINDOW，并刷新样式）
     #[cfg(target_os = "windows")]
     {
         // 访问底层的 winit 窗口
         window.window().with_winit_window(|winit_window| {
             // 设置位置
-            winit_window.set_outer_position(LogicalPosition::new(1000.0, 500.0));
+            winit_window.set_outer_position(LogicalPosition::new(x, y));
             // 获取原始句柄 (raw-window-handle 0.6 语法)
             if let Ok(handle) = winit_window.window_handle() {
                 if let RawWindowHandle::Win32(win32_handle) = handle.as_raw() {
