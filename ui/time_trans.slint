@@ -5,13 +5,15 @@ export component TimeTrans inherits Window {
     no-frame: true;
     always-on-top: true;
     width: 210px;
-    height: 95px;
+    height: 100px;
+    background: transparent;
 
     // 定义变量
     in-out property <string> input_value: "2006-01-02 15:04:05";
     in-out property <string> result_value: "2006-01-02 15:04:05";
     in-out property <bool> timestamp_unit: false;
     in-out property <int> timezone_index: 0;
+    in-out property <int> close_time: 3;
     property <[string]> timezones: [
         "Asia/Shanghai",
         "UTC",
@@ -28,7 +30,6 @@ export component TimeTrans inherits Window {
         "GMT/+0",
         "JST/+9"
     ];
-    property <int> close_time: 10;
     out property <bool> has-hover;
 
     // 定义回调函数（rust函数）
@@ -52,11 +53,10 @@ export component TimeTrans inherits Window {
         interval: 1s;
         running: true;
         triggered() => {
-            if (!area.has-hover) {
+            if (!area.has-hover && close_time > 0) {
                 close_time -= 1;
                 if (close_time == 0) {
                     root.close_window();
-                    self.running = false;
                 }
             }
         }
@@ -69,93 +69,101 @@ export component TimeTrans inherits Window {
     }
 
     // 子组件内容
-    VerticalLayout {
-        padding: 2px;
-        spacing: 2px;
+    Rectangle {
+        width: root.width;
+        height: root.height;
+        border-radius: 8px;     // 圆角大小，按需调整
+        background: rgba(255,255,255,0.95); // 可换成其它颜色或透明度
+        clip: true;             // 裁切子元素到圆角区域
 
-        HorizontalLayout {
+        VerticalLayout {
+            padding: 5px;
             spacing: 2px;
-            VerticalBox {
-                padding: 2px;
-                LineEdit {
-                    placeholder-text: "输入时间戳或时间字符串";
-                    text <=> root.input_value;
+
+            HorizontalLayout {
+                spacing: 2px;
+                VerticalBox {
+                    padding: 2px;
+                    LineEdit {
+                        placeholder-text: "输入时间戳或时间字符串";
+                        text <=> root.input_value;
+                    }
                 }
-            }
 
-            CloseButton {
-                clicked => {
-                    root.close_window();
-                };
-            }
-        }
-
-        HorizontalLayout {
-            spacing: 2px;
-
-            Switch {
-                width: 75px;
-                text: self.checked ? "ms" : "s";
-                checked <=> timestamp_unit;
+                CloseButton {
+                    clicked => {
+                        root.close_window();
+                    };
+                }
             }
 
             HorizontalLayout {
                 spacing: 2px;
 
-                Button {
-                    height: 25px;
-                    text: "<";
-                    clicked => {
-                        if root.timezone_index == 0 {
-                            root.timezone_index = root.timezones.length - 1;
-                        } else {
-                            root.timezone_index -= 1;
+                Switch {
+                    width: 75px;
+                    text: self.checked ? "ms" : "s";
+                    checked <=> timestamp_unit;
+                }
+
+                HorizontalLayout {
+                    spacing: 2px;
+
+                    Button {
+                        height: 25px;
+                        text: "<";
+                        clicked => {
+                            if root.timezone_index == 0 {
+                                root.timezone_index = root.timezones.length - 1;
+                            } else {
+                                root.timezone_index -= 1;
+                            }
+                        }
+                    }
+
+                    Text {
+                        text: timezone_labels[root.timezone_index];
+                        width: 50px;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+
+                    Button {
+                        height: 25px;
+                        text: ">";
+                        clicked => {
+                            if root.timezone_index >= root.timezones.length - 1 {
+                                root.timezone_index = 0;
+                            } else {
+                                root.timezone_index += 1;
+                            }
                         }
                     }
                 }
+            }
+
+            HorizontalLayout {
+                spacing: 2px;
 
                 Text {
-                    text: timezone_labels[root.timezone_index];
-                    width: 50px;
+                    font-size: 14px;
+                    font-weight: 700;
+                    color: blue;
+                    text: root.result_value;
+                    horizontal-stretch: 1;
                     horizontal-alignment: center;
                     vertical-alignment: center;
                 }
 
                 Button {
+                    width: 55px;
                     height: 25px;
-                    text: ">";
-                    clicked => {
-                        if root.timezone_index >= root.timezones.length - 1 {
-                            root.timezone_index = 0;
-                        } else {
-                            root.timezone_index += 1;
-                        }
-                    }
+                    text: "Copy";
+                    enabled: root.result_value != "";
+                    clicked => copy_to_clipboard(root.result_value);
                 }
             }
+
         }
-
-        HorizontalLayout {
-            spacing: 2px;
-
-            Text {
-                font-size: 16px;
-                font-weight: 700;
-                color: blue;
-                text: root.result_value;
-                horizontal-stretch: 1;
-                horizontal-alignment: center;
-                vertical-alignment: center;
-            }
-
-            Button {
-                width: 55px;
-                height: 25px;
-                text: "Copy";
-                enabled: root.result_value != "";
-                clicked => copy_to_clipboard(root.result_value);
-            }
-        }
-
     }
 }

@@ -53,6 +53,7 @@ pub fn run() {
                     let cur_y = *mouse_y.lock().unwrap();
                     weak.clone().upgrade_in_event_loop(move |window| {
                         window.show().unwrap();
+                        window.set_close_time(3);
                         // 设置窗口位置到鼠标位置
                         info!("set window pos to x:{},y:{}", cur_x, cur_y);
                         set_pos_and_hide_taskbar(&window, cur_x, cur_y);
