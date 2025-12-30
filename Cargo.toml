@@ -15,6 +15,8 @@ log = "0.4.27"
 flexi_logger = "0.23"
 image = "0.24"
 tray-icon = "0.21.2"
+# 跨平台粘贴板库
+arboard = "2"
 winit = "0.30.12"
 # 用于访问 winit 特性
 i-slint-backend-winit = "1.7"

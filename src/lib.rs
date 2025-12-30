@@ -8,8 +8,10 @@ use tray_icon::{Icon, TrayIcon};
 use tray_icon::menu::MenuItem;
 use std::sync::{Arc, Mutex};
 use std::thread::{self, sleep};
+use std::time::Duration;
 use rdev::{Event, listen};
 use rdev::EventType;
+use arboard::Clipboard;
 use tray_icon::{TrayIconBuilder,TrayIconEvent, menu::{Menu,MenuEvent}};
 use flexi_logger::{Logger, Duplicate, FileSpec, Criterion, Naming, Cleanup};
 use log::{info, warn, error};
@@ -52,11 +54,15 @@ pub fn run() {
                     let cur_x = *mouse_x.lock().unwrap();
                     let cur_y = *mouse_y.lock().unwrap();
                     weak.clone().upgrade_in_event_loop(move |window| {
+                        // 读取文本
+                        std::thread::sleep(Duration::from_millis(200));
+                        let mut clipboard = Clipboard::new().unwrap();
+                        println!("粘贴板内容: {}", clipboard.get_text().unwrap());
                         window.show().unwrap();
                         window.set_close_time(3);
                         // 设置窗口位置到鼠标位置
                         info!("set window pos to x:{},y:{}", cur_x, cur_y);
-                        set_pos_and_hide_taskbar(&window, cur_x, cur_y);
+                        set_pos_and_hide_taskbar(&window, cur_x + 20f64, cur_y + 10f64);
                     }).expect("Failed to send event to UI thread")
                 }
                 _ => {}
@@ -112,6 +118,11 @@ pub fn init_time_trans_window() -> TimeTrans {
             let _ = window.hide();
         }
     });
+    time_window.on_copy_to_clipboard(|s| {
+        let mut clipboard = Clipboard::new().unwrap();
+        // 设置文本
+        clipboard.set_text(s.into()).unwrap();
+    });
 
     time_window
 }
@@ -161,7 +172,7 @@ pub fn init_tray_icon() -> (TrayIcon, Menu) {
         .with_menu(Box::new(tray_menu.clone()))
         .with_menu_on_left_click(false)
         .with_tooltip("system-tray - tray icon library!")
-        .with_icon(load_icon("ui/icons/icon.png"))
+        .with_icon(load_icon("./assets/icons/icon.png"))
         .build()
         .unwrap();
     (tray_icon, tray_menu)
