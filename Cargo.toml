@@ -7,7 +7,7 @@ edition = "2024"
 linker = "rust-lld.exe"
 
 [dependencies]
-slint = "1.14.1"
+slint = { version = "1.14", features = ["renderer-skia"] }
 chrono = { version = "0.4", features = ["serde"] }
 chrono-tz = "0.10.3"
 rdev = "0.5.3"
@@ -27,3 +27,11 @@ windows-sys = { version = "0.52", features = ["Win32_UI_WindowsAndMessaging"] }
 
 [build-dependencies]
 slint-build = "1.14.1"
+
+# release优化
+[profile.release]
+opt-level = "z"      # 优化文件体积
+lto = true           # 开启全局链接优化
+codegen-units = 1    # 牺牲编译速度换取更小的体积
+panic = "abort"      # 移除异常回溯代码
+strip = true         # 自动剥离符号表 (Rust 1.59+)

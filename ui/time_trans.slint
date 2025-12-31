@@ -31,6 +31,7 @@ export component TimeTrans inherits Window {
         "JST/+9"
     ];
     property <bool> has-hover: false;
+    property <bool> has_copy: false;
 
     // 定义回调函数（rust函数）
     callback update_result(input: string, unit: bool, timezone: string);
@@ -58,6 +59,7 @@ export component TimeTrans inherits Window {
                 if (close_time == 0) {
                     root.close_window();
                     root.has-hover = false;
+                    root.has_copy = false;
                 }
             }
         }
@@ -98,6 +100,7 @@ export component TimeTrans inherits Window {
                     clicked => {
                         root.close_window();
                         root.has-hover = false;
+                        root.has_copy = false;
                     };
                 }
             }
@@ -163,9 +166,12 @@ export component TimeTrans inherits Window {
                 Button {
                     width: 55px;
                     height: 25px;
-                    text: "Copy";
+                    text: root.has_copy?"✔":"Copy";
                     enabled: root.result_value != "";
-                    clicked => copy_to_clipboard(root.result_value);
+                    clicked => {
+                        copy_to_clipboard(root.result_value);
+                        root.has_copy = true;
+                    }
                 }
             }
 
