@@ -14,22 +14,10 @@ export component TimeTrans inherits Window {
     in-out property <bool> timestamp_unit: false;
     in-out property <int> timezone_index: 0;
     in-out property <int> close_time: 3;
-    property <[string]> timezones: [
-        "Asia/Shanghai",
-        "UTC",
-        "America/New_York",
-        "America/Los_Angeles",
-        "Europe/London",
-        "Asia/Tokyo"
-    ];
-    property <[string]> timezone_labels: [
-        "CST/+8",
-        "UTC/+0",
-        "EST/-5",
-        "PST/-8",
-        "GMT/+0",
-        "JST/+9"
-    ];
+    // 建议的 IANA 时区标识符
+    in-out property <[string]> timezones: [];
+    // 对应的显示标签
+    in-out property <[string]> timezone_labels: [];
     property <bool> has-hover: false;
     property <bool> has_copy: false;
 

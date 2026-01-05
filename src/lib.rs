@@ -1,17 +1,19 @@
-use chrono::{DateTime, TimeZone, Utc};
+use chrono::{DateTime, NaiveDateTime, TimeZone, Utc};
 use chrono_tz::Tz;
 use winit::dpi::LogicalPosition;
-use slint::ComponentHandle;
+use slint::{ComponentHandle, SharedString, VecModel};
 use i_slint_backend_winit::WinitWindowAccessor;
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use tray_icon::{Icon, TrayIcon};
 use tray_icon::menu::MenuItem;
+use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::thread::{self, sleep};
 use std::time::Duration;
 use rdev::{Event, listen};
 use rdev::EventType;
 use arboard::Clipboard;
+use regex::Regex;
 use tray_icon::{TrayIconBuilder,TrayIconEvent, menu::{Menu,MenuEvent}};
 use flexi_logger::{Logger, Duplicate, FileSpec, Criterion, Naming, Cleanup};
 use log::{info, warn, error};
@@ -57,11 +59,11 @@ pub fn run() {
                         // 读取文本
                         std::thread::sleep(Duration::from_millis(200));
                         let mut clipboard = Clipboard::new().unwrap();
-                        println!("粘贴板内容: {}", clipboard.get_text().unwrap());
                         window.show().unwrap();
                         window.set_close_time(3);
+                        window.set_input_value(clipboard.get_text().unwrap().into());
                         // 设置窗口位置到鼠标位置
-                        info!("set window pos to x:{},y:{}", cur_x, cur_y);
+                        info!("set window pos to x:{},y:{},copy:{}", cur_x, cur_y, clipboard.get_text().unwrap());
                         set_pos_and_hide_taskbar(&window, cur_x + 20f64, cur_y + 10f64);
                     }).expect("Failed to send event to UI thread")
                 }
@@ -113,15 +115,33 @@ pub fn init_time_trans_window() -> TimeTrans {
     let time_window = TimeTrans::new().unwrap();
     let tw = time_window.as_weak();
 
+    let label_model = Rc::new(VecModel::from(TIMEZONE_LABELS.iter().map(|&label| SharedString::from(label)).collect::<Vec<SharedString>>()));
+    time_window.set_timezone_labels(label_model.clone().into());
+
+    let zone_model = Rc::new(VecModel::from(TIMEZONES.iter().map(|&zone| SharedString::from(zone)).collect::<Vec<SharedString>>()));
+    time_window.set_timezones(zone_model.clone().into());
+
     time_window.on_close_window(move || {
         if let Some(window) = tw.upgrade() {
             let _ = window.hide();
         }
     });
+
     time_window.on_copy_to_clipboard(|s| {
         let mut clipboard = Clipboard::new().unwrap();
         // 设置文本
         clipboard.set_text(s.into()).unwrap();
+    });
+
+    let tw1 = time_window.as_weak();
+    time_window.on_update_result(move |input_value,unit,zone|{
+        let (result,unit) = trans_string_timestamp(input_value.as_str(), unit, zone.to_string());
+        if let Some(window) = tw1.upgrade() {
+            window.set_result_value(result.into());
+            if let Some(u) = unit {
+                window.set_timestamp_unit(u);
+            }
+        }
     });
 
     time_window
@@ -223,5 +243,122 @@ fn set_pos_and_hide_taskbar(window: &TimeTrans, x: f64, y: f64) {
                 }
             }
         });
-    }
+    } 
 }
+
+// 字符串时间戳相互转换
+fn trans_string_timestamp(input: &str, unit: bool, zone: String) -> (String, Option<bool>) {
+    let mut timestamp = 0i64;
+    let tz: Tz = zone.parse().unwrap_or_default();
+    
+    // 10位时间戳
+    let re = Regex::new(r"^[12]\d{9}$").unwrap();
+    if re.is_match(input) {
+        timestamp = input.parse().unwrap();
+    }
+    if timestamp != 0 {
+        let dt = Utc.timestamp_opt(timestamp, 0).single().unwrap();
+        let local_time = dt.with_timezone(&tz);
+        return (local_time.format("%Y-%m-%d %H:%M:%S").to_string(), Some(false));
+    }
+    
+    // 13位时间戳
+    let re = Regex::new(r"^[12]\d{12}$").unwrap();
+    if re.is_match(input) {
+        timestamp = input.parse::<i64>().unwrap() / 1000;
+    }
+    if timestamp != 0 {
+        let dt = Utc.timestamp_opt(timestamp, 0).single().unwrap();
+        let local_time = dt.with_timezone(&tz);
+        return (local_time.format("%Y-%m-%d %H:%M:%S").to_string(), Some(true));
+    }
+
+    // %Y-%m-%d %H:%M:%S 时间字符串
+    let re = Regex::new(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$").unwrap();
+    if re.is_match(input) {
+        if let Ok(naive_dt) = NaiveDateTime::parse_from_str(input, "%Y-%m-%d %H:%M:%S") {
+            let dt_in_tz = tz.from_local_datetime(&naive_dt).single();
+            if let Some(dt) = dt_in_tz {
+                let mut timestamp = dt.timestamp();
+                if unit {
+                    timestamp *= 1000;
+                }
+                return (timestamp.to_string(), None);
+            }
+        }
+    }
+
+    // %Y-%m-%dT%H:%M:%S+08:00 时间字符串
+    let re = Regex::new(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}$").unwrap();
+    if re.is_match(input) {
+        //根据input中后缀的时区偏移，转换为对应时区时间，然后再转成目标时区
+        if let Ok(dt) = DateTime::parse_from_rfc3339(input) {
+            let mut timestamp = dt.timestamp();
+                if unit {
+                    timestamp *= 1000;
+                }
+            return (timestamp.to_string(), None);
+        }
+    }
+
+    // %Y-%m-%d 时间字符串
+    let re = Regex::new(r"^\d{4}-\d{2}-\d{2}$").unwrap();
+    if re.is_match(input) {
+        if let Ok(naive_dt) = NaiveDateTime::parse_from_str(&(input.to_string() + " 00:00:00"), "%Y-%m-%d %H:%M:%S") {
+            let dt_in_tz = tz.from_local_datetime(&naive_dt).single();
+            if let Some(dt) = dt_in_tz {
+                let mut timestamp = dt.timestamp();
+                if unit {
+                    timestamp *= 1000;
+                }
+                return (timestamp.to_string(), None);
+            }
+        }
+    }
+
+    // RFC 2822 时间字符串
+    let re = Regex::new(r"^[A-Za-z]{3}, \d{1,2} [A-Za-z]{3} \d{4} \d{2}:\d{2}:\d{2} [+-]\d{4}$").unwrap();
+    if re.is_match(input) {
+        if let Ok(dt) = DateTime::parse_from_rfc2822(input) {
+            let mut timestamp = dt.timestamp();
+            if unit {
+                timestamp *= 1000;
+            }
+            return (timestamp.to_string(), None);
+        }
+    }
+
+    ("Error".to_string(), None)
+}
+
+const TIMEZONES: [&str; 13] = [
+    "Asia/Shanghai",       // 中国标准时间 (CST)
+    "Asia/Tokyo",          // 日本标准时间 (JST)
+    "Asia/Kolkata",        // 印度标准时间 (IST)
+    "Asia/Singapore",      // 新加坡/马来西亚 (SGT)
+    "UTC",                 // 协调世界时
+    "GMT",                 // 格林威治标准时间
+    "Europe/London",       // 伦敦 (GMT/BST)
+    "Europe/Paris",        // 巴黎 (CET/CEST)
+    "America/New_York",    // 美国东部 (EST/EDT)
+    "America/Chicago",     // 美国中部 (CST/CDT)
+    "America/Denver",      // 美国山地 (MST/MDT)
+    "America/Los_Angeles", // 美国太平洋 (PST/PDT)
+    "Australia/Sydney"     // 悉尼 (AEST/AEDT)
+];
+
+const TIMEZONE_LABELS: [&str; 13] = [
+    "CST/北京",
+    "JST/东京",
+    "IST/新德里",
+    "SGT/新加坡",
+    "UTC",
+    "GMT",
+    "BST/伦敦",
+    "CET/巴黎",
+    "ET/纽约",
+    "CT/芝加哥",
+    "MT/丹佛",
+    "PT/洛杉矶",
+    "AET/悉尼",
+];
