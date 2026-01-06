@@ -9,15 +9,16 @@ export component TimeTrans inherits Window {
     background: transparent;
 
     // 定义变量
-    in-out property <string> input_value: "2006-01-02 15:04:05";
-    in-out property <string> result_value: "2006-01-02 15:04:05";
+    in-out property <string> input_value: "";
+    in-out property <string> result_value: "";
     in-out property <bool> timestamp_unit: false;
     in-out property <int> timezone_index: 0;
-    in-out property <int> close_time: 3;
     // 建议的 IANA 时区标识符
     in-out property <[string]> timezones: [];
     // 对应的显示标签
     in-out property <[string]> timezone_labels: [];
+    
+    property <int> close_time: 3;
     property <bool> has-hover: false;
     property <bool> has_copy: false;
 
@@ -25,16 +26,29 @@ export component TimeTrans inherits Window {
     callback update_result(input: string, unit: bool, timezone: string);
     callback copy_to_clipboard(text: string);
     callback close_window();
+    callback show_window();
 
     // 值变更回调
     changed input_value => {
-        update_result(root.input_value, root.timestamp_unit, root.timezones[root.timezone_index]);
+        if (root.input_value != "") {
+            update_result(root.input_value, root.timestamp_unit, root.timezones[root.timezone_index]);
+        }
     }
     changed timestamp_unit => {
-        update_result(root.input_value, root.timestamp_unit, root.timezones[root.timezone_index]);
+        if (root.input_value != "") {
+            update_result(root.input_value, root.timestamp_unit, root.timezones[root.timezone_index]);
+        }
     }
     changed timezone_index => {
-        update_result(root.input_value, root.timestamp_unit, root.timezones[root.timezone_index]);
+        if (root.input_value != "") {
+            update_result(root.input_value, root.timestamp_unit, root.timezones[root.timezone_index]);
+        }
+    }
+    changed result_value => {
+        if (root.result_value != "Error" && root.result_value != "") {
+            root.close_time = 3;
+            show_window();
+        }
     }
 
     // 定时器
@@ -48,6 +62,8 @@ export component TimeTrans inherits Window {
                     root.close_window();
                     root.has-hover = false;
                     root.has_copy = false;
+                    root.input_value = "";
+                    root.result_value = "";
                 }
             }
         }
@@ -120,7 +136,7 @@ export component TimeTrans inherits Window {
                     Text {
                         text: timezone_labels[root.timezone_index];
                         width: 50px;
-                        horizontal-alignment: center;
+                        horizontal-alignment: left;
                         vertical-alignment: center;
                     }
 
@@ -147,7 +163,7 @@ export component TimeTrans inherits Window {
                     color: blue;
                     text: root.result_value;
                     horizontal-stretch: 1;
-                    horizontal-alignment: center;
+                    horizontal-alignment: left;
                     vertical-alignment: center;
                 }
 

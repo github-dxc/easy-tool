@@ -59,8 +59,6 @@ pub fn run() {
                         // 读取文本
                         std::thread::sleep(Duration::from_millis(200));
                         let mut clipboard = Clipboard::new().unwrap();
-                        window.show().unwrap();
-                        window.set_close_time(3);
                         window.set_input_value(clipboard.get_text().unwrap().into());
                         // 设置窗口位置到鼠标位置
                         info!("set window pos to x:{},y:{},copy:{}", cur_x, cur_y, clipboard.get_text().unwrap());
@@ -113,7 +111,6 @@ pub fn test_window() {
 // 时间转换窗口
 pub fn init_time_trans_window() -> TimeTrans {
     let time_window = TimeTrans::new().unwrap();
-    let tw = time_window.as_weak();
 
     let label_model = Rc::new(VecModel::from(TIMEZONE_LABELS.iter().map(|&label| SharedString::from(label)).collect::<Vec<SharedString>>()));
     time_window.set_timezone_labels(label_model.clone().into());
@@ -121,9 +118,17 @@ pub fn init_time_trans_window() -> TimeTrans {
     let zone_model = Rc::new(VecModel::from(TIMEZONES.iter().map(|&zone| SharedString::from(zone)).collect::<Vec<SharedString>>()));
     time_window.set_timezones(zone_model.clone().into());
 
+    let tw = time_window.as_weak();
     time_window.on_close_window(move || {
         if let Some(window) = tw.upgrade() {
             let _ = window.hide();
+        }
+    });
+
+    let tw1 = time_window.as_weak();
+    time_window.on_show_window(move || {
+        if let Some(window) = tw1.upgrade() {
+            let _ = window.show();
         }
     });
 
@@ -133,13 +138,21 @@ pub fn init_time_trans_window() -> TimeTrans {
         clipboard.set_text(s.into()).unwrap();
     });
 
-    let tw1 = time_window.as_weak();
+    let tw2 = time_window.as_weak();
     time_window.on_update_result(move |input_value,unit,zone|{
         let (result,unit) = trans_string_timestamp(input_value.as_str(), unit, zone.to_string());
-        if let Some(window) = tw1.upgrade() {
-            window.set_result_value(result.into());
-            if let Some(u) = unit {
-                window.set_timestamp_unit(u);
+        
+        if let Some(window) = tw2.upgrade() {
+            match result {
+                Ok(result_value) => {
+                    window.set_result_value(result_value.into());
+                    if let Some(u) = unit {
+                        window.set_timestamp_unit(u);
+                    }
+                },
+                Err(str) => {
+                    window.set_result_value(str.into());
+                }
             }
         }
     });
@@ -247,7 +260,7 @@ fn set_pos_and_hide_taskbar(window: &TimeTrans, x: f64, y: f64) {
 }
 
 // 字符串时间戳相互转换
-fn trans_string_timestamp(input: &str, unit: bool, zone: String) -> (String, Option<bool>) {
+fn trans_string_timestamp(input: &str, unit: bool, zone: String) -> (Result<String, String>, Option<bool>) {
     let mut timestamp = 0i64;
     let tz: Tz = zone.parse().unwrap_or_default();
     
@@ -259,7 +272,7 @@ fn trans_string_timestamp(input: &str, unit: bool, zone: String) -> (String, Opt
     if timestamp != 0 {
         let dt = Utc.timestamp_opt(timestamp, 0).single().unwrap();
         let local_time = dt.with_timezone(&tz);
-        return (local_time.format("%Y-%m-%d %H:%M:%S").to_string(), Some(false));
+        return (Ok(local_time.format("%Y-%m-%d %H:%M:%S").to_string()), Some(false));
     }
     
     // 13位时间戳
@@ -270,7 +283,7 @@ fn trans_string_timestamp(input: &str, unit: bool, zone: String) -> (String, Opt
     if timestamp != 0 {
         let dt = Utc.timestamp_opt(timestamp, 0).single().unwrap();
         let local_time = dt.with_timezone(&tz);
-        return (local_time.format("%Y-%m-%d %H:%M:%S").to_string(), Some(true));
+        return (Ok(local_time.format("%Y-%m-%d %H:%M:%S").to_string()), Some(true));
     }
 
     // %Y-%m-%d %H:%M:%S 时间字符串
@@ -283,7 +296,7 @@ fn trans_string_timestamp(input: &str, unit: bool, zone: String) -> (String, Opt
                 if unit {
                     timestamp *= 1000;
                 }
-                return (timestamp.to_string(), None);
+                return (Ok(timestamp.to_string()), None);
             }
         }
     }
@@ -297,7 +310,7 @@ fn trans_string_timestamp(input: &str, unit: bool, zone: String) -> (String, Opt
                 if unit {
                     timestamp *= 1000;
                 }
-            return (timestamp.to_string(), None);
+            return (Ok(timestamp.to_string()), None);
         }
     }
 
@@ -311,7 +324,7 @@ fn trans_string_timestamp(input: &str, unit: bool, zone: String) -> (String, Opt
                 if unit {
                     timestamp *= 1000;
                 }
-                return (timestamp.to_string(), None);
+                return (Ok(timestamp.to_string()), None);
             }
         }
     }
@@ -324,20 +337,19 @@ fn trans_string_timestamp(input: &str, unit: bool, zone: String) -> (String, Opt
             if unit {
                 timestamp *= 1000;
             }
-            return (timestamp.to_string(), None);
+            return (Ok(timestamp.to_string()), None);
         }
     }
 
-    ("Error".to_string(), None)
+    (Err("Error".to_string()), None)
 }
 
-const TIMEZONES: [&str; 13] = [
+const TIMEZONES: [&str; 12] = [
     "Asia/Shanghai",       // 中国标准时间 (CST)
+    "Etc/UTC",             // 协调世界时
     "Asia/Tokyo",          // 日本标准时间 (JST)
     "Asia/Kolkata",        // 印度标准时间 (IST)
     "Asia/Singapore",      // 新加坡/马来西亚 (SGT)
-    "UTC",                 // 协调世界时
-    "GMT",                 // 格林威治标准时间
     "Europe/London",       // 伦敦 (GMT/BST)
     "Europe/Paris",        // 巴黎 (CET/CEST)
     "America/New_York",    // 美国东部 (EST/EDT)
@@ -347,13 +359,12 @@ const TIMEZONES: [&str; 13] = [
     "Australia/Sydney"     // 悉尼 (AEST/AEDT)
 ];
 
-const TIMEZONE_LABELS: [&str; 13] = [
+const TIMEZONE_LABELS: [&str; 12] = [
     "CST/北京",
+    "UTC",
     "JST/东京",
     "IST/新德里",
     "SGT/新加坡",
-    "UTC",
-    "GMT",
     "BST/伦敦",
     "CET/巴黎",
     "ET/纽约",
