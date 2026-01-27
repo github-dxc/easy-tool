@@ -158,7 +158,7 @@ pub fn init_time_trans_window() -> TimeTrans {
         }
     });
 
-    set_hide_parent(&time_window);
+    set_hide_parent_and_style(&time_window);
 
     time_window
 }
@@ -228,8 +228,7 @@ fn load_icon(path: &str) -> Icon {
 }
 
 // 设置一个默认的父窗口
-fn set_hide_parent(time_window: &TimeTrans) {
-    // 隐藏窗口的任务栏图标（改进：清除 WS_EX_APPWINDOW，设置 WS_EX_TOOLWINDOW，并刷新样式）
+fn set_hide_parent_and_style(time_window: &TimeTrans) {
     #[cfg(target_os = "windows")]
     {
         time_window.window().with_winit_window(|winit_window| {
@@ -238,9 +237,25 @@ fn set_hide_parent(time_window: &TimeTrans) {
                     let hwnd = win32_handle.hwnd.get() as isize;
                     unsafe {
                         use windows_sys::Win32::UI::WindowsAndMessaging::*;
-                        // 获取一个通常永远存在的隐藏窗口，或者自己创建一个 1x1 的隐藏窗口作为父级
+
+                        // 1. 设置 Owner 为 Shell 窗口 (或者 0)
+                        // 设置这个可以防止点击时图标在任务栏“蹦”出来
                         let shell_window = GetShellWindow(); 
                         SetWindowLongPtrW(hwnd, GWL_HWNDPARENT, shell_window as isize);
+
+                        // 2. 重新加固样式 (确保 ToolWindow 标志位存在)
+                        let mut ex_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as isize;
+                        ex_style |= WS_EX_TOOLWINDOW as isize;
+                        ex_style |= WS_EX_NOACTIVATE as isize;
+                        ex_style &= !(WS_EX_APPWINDOW as isize);
+                        SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex_style);
+
+                        // 3. 核心步骤：必须调用 SetWindowPos 触发样式刷新
+                        // SWP_FRAMECHANGED 是让任务栏感知变化的关键
+                        SetWindowPos(
+                            hwnd, 0, 0, 0, 0, 0,
+                            SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE
+                        );
                     }
                 }
             }
