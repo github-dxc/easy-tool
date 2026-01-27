@@ -19,7 +19,7 @@ export component TimeTrans inherits Window {
     in-out property <[string]> timezone_labels: [];
     
     property <int> close_time: 3;
-    property <bool> has-hover: false;
+    property <bool> has_hover: false;
     property <bool> has_copy: false;
 
     // 定义回调函数（rust函数）
@@ -56,11 +56,11 @@ export component TimeTrans inherits Window {
         interval: 1s;
         running: true;
         triggered() => {
-            if (!root.has-hover && close_time > 0) {
+            if (!root.has_hover && close_time > 0) {
                 close_time -= 1;
                 if (close_time == 0) {
                     root.close_window();
-                    root.has-hover = false;
+                    root.has_hover = false;
                     root.has_copy = false;
                     root.input_value = "";
                     root.result_value = "";
@@ -73,8 +73,8 @@ export component TimeTrans inherits Window {
         width: root.width;
         height: root.height;
         enabled: true;
-        changed has-hover => {
-            root.has-hover = true;
+        changed has_hover => {
+            root.has_hover = true;
         }
     }
 
@@ -103,7 +103,7 @@ export component TimeTrans inherits Window {
                 CloseButton {
                     clicked => {
                         root.close_window();
-                        root.has-hover = false;
+                        root.has_hover = false;
                         root.has_copy = false;
                     };
                 }

@@ -62,7 +62,7 @@ pub fn run() {
                         window.set_input_value(clipboard.get_text().unwrap().into());
                         // 设置窗口位置到鼠标位置
                         info!("set window pos to x:{},y:{},copy:{}", cur_x, cur_y, clipboard.get_text().unwrap());
-                        set_pos_and_hide_taskbar(&window, cur_x + 20f64, cur_y + 10f64);
+                        set_position(&window, cur_x + 20f64, cur_y + 10f64);
                     }).expect("Failed to send event to UI thread")
                 }
                 _ => {}
@@ -128,6 +128,7 @@ pub fn init_time_trans_window() -> TimeTrans {
     let tw1 = time_window.as_weak();
     time_window.on_show_window(move || {
         if let Some(window) = tw1.upgrade() {
+            hide_taskbar_icon(&window);
             let _ = window.show();
         }
     });
@@ -156,6 +157,8 @@ pub fn init_time_trans_window() -> TimeTrans {
             }
         }
     });
+
+    set_hide_parent(&time_window);
 
     time_window
 }
@@ -224,39 +227,71 @@ fn load_icon(path: &str) -> Icon {
     Icon::from_rgba(rgba, width, height).expect("创建图标失败")
 }
 
-fn set_pos_and_hide_taskbar(window: &TimeTrans, x: f64, y: f64) {
+// 设置一个默认的父窗口
+fn set_hide_parent(time_window: &TimeTrans) {
     // 隐藏窗口的任务栏图标（改进：清除 WS_EX_APPWINDOW，设置 WS_EX_TOOLWINDOW，并刷新样式）
     #[cfg(target_os = "windows")]
     {
-        // 访问底层的 winit 窗口
-        window.window().with_winit_window(|winit_window| {
-            // 设置位置
-            winit_window.set_outer_position(LogicalPosition::new(x, y));
-            // 获取原始句柄 (raw-window-handle 0.6 语法)
+        time_window.window().with_winit_window(|winit_window| {
             if let Ok(handle) = winit_window.window_handle() {
                 if let RawWindowHandle::Win32(win32_handle) = handle.as_raw() {
                     let hwnd = win32_handle.hwnd.get() as isize;
-
                     unsafe {
                         use windows_sys::Win32::UI::WindowsAndMessaging::*;
-
-                        // 使用 Get/SetWindowLongPtr 更加安全（64 位兼容）
-                        let mut ex_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as isize;
-
-                        // 增加工具窗口样式，移除应用窗口样式（避免在任务栏显示）
-                        ex_style |= WS_EX_TOOLWINDOW as isize;
-                        ex_style &= !(WS_EX_APPWINDOW as isize);
-
-                        SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex_style);
-
-                        // 通知系统样式已改变，立即刷新窗口外观
-                        const SWP_FLAGS: u32 = SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER;
-                        SetWindowPos(hwnd, 0, 0, 0, 0, 0, SWP_FLAGS);
+                        // 获取一个通常永远存在的隐藏窗口，或者自己创建一个 1x1 的隐藏窗口作为父级
+                        let shell_window = GetShellWindow(); 
+                        SetWindowLongPtrW(hwnd, GWL_HWNDPARENT, shell_window as isize);
                     }
                 }
             }
         });
+    }
+}
+
+// 设置窗口位置
+fn set_position(time_window: &TimeTrans, x: f64, y: f64) {
+    // 隐藏窗口的任务栏图标（改进：清除 WS_EX_APPWINDOW，设置 WS_EX_TOOLWINDOW，并刷新样式）
+    #[cfg(target_os = "windows")]
+    {
+        // 访问底层的 winit 窗口
+        time_window.window().with_winit_window(|winit_window| {
+            // 设置位置
+            winit_window.set_outer_position(LogicalPosition::new(x, y));
+        });
     } 
+}
+
+// 隐藏任务栏图标
+fn hide_taskbar_icon(time_window: &TimeTrans) {
+    // 隐藏窗口的任务栏图标（改进：清除 WS_EX_APPWINDOW，设置 WS_EX_TOOLWINDOW，并刷新样式）
+    #[cfg(target_os = "windows")]
+    {
+        time_window.window().with_winit_window(|winit_window| {
+            if let Ok(handle) = winit_window.window_handle() {
+                if let RawWindowHandle::Win32(win32_handle) = handle.as_raw() {
+                    let hwnd = win32_handle.hwnd.get() as isize;
+                    unsafe {
+                        use windows_sys::Win32::UI::WindowsAndMessaging::*;
+
+                        // 获取当前样式并转换成 u32 处理更自然
+                        let old_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32;
+                        let new_style = (old_style | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE) & !WS_EX_APPWINDOW;
+                        
+                        if old_style != new_style {
+                            SetWindowLongPtrW(hwnd, GWL_EXSTYLE, new_style as isize);
+                            
+                            // 确保样式立即生效
+                            SetWindowPos(
+                                hwnd, 
+                                0, 0, 0, 0, 0, 
+                                SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE
+                            );
+                        }
+                    }
+                }
+            }
+        });
+    }
 }
 
 // 字符串时间戳相互转换
