@@ -128,8 +128,8 @@ pub fn init_time_trans_window() -> TimeTrans {
     let tw1 = time_window.as_weak();
     time_window.on_show_window(move || {
         if let Some(window) = tw1.upgrade() {
-            hide_taskbar_icon(&window);
             let _ = window.show();
+            hide_taskbar_icon(&window);
         }
     });
 
@@ -157,8 +157,6 @@ pub fn init_time_trans_window() -> TimeTrans {
             }
         }
     });
-
-    set_hide_parent_and_style(&time_window);
 
     time_window
 }
@@ -225,42 +223,6 @@ fn load_icon(path: &str) -> Icon {
     // 获取原始像素字节流
     let rgba = img.into_raw();
     Icon::from_rgba(rgba, width, height).expect("创建图标失败")
-}
-
-// 设置一个默认的父窗口
-fn set_hide_parent_and_style(time_window: &TimeTrans) {
-    #[cfg(target_os = "windows")]
-    {
-        time_window.window().with_winit_window(|winit_window| {
-            if let Ok(handle) = winit_window.window_handle() {
-                if let RawWindowHandle::Win32(win32_handle) = handle.as_raw() {
-                    let hwnd = win32_handle.hwnd.get() as isize;
-                    unsafe {
-                        use windows_sys::Win32::UI::WindowsAndMessaging::*;
-
-                        // 1. 设置 Owner 为 Shell 窗口 (或者 0)
-                        // 设置这个可以防止点击时图标在任务栏“蹦”出来
-                        let shell_window = GetShellWindow(); 
-                        SetWindowLongPtrW(hwnd, GWL_HWNDPARENT, shell_window as isize);
-
-                        // 2. 重新加固样式 (确保 ToolWindow 标志位存在)
-                        let mut ex_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as isize;
-                        ex_style |= WS_EX_TOOLWINDOW as isize;
-                        ex_style |= WS_EX_NOACTIVATE as isize;
-                        ex_style &= !(WS_EX_APPWINDOW as isize);
-                        SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex_style);
-
-                        // 3. 核心步骤：必须调用 SetWindowPos 触发样式刷新
-                        // SWP_FRAMECHANGED 是让任务栏感知变化的关键
-                        SetWindowPos(
-                            hwnd, 0, 0, 0, 0, 0,
-                            SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE
-                        );
-                    }
-                }
-            }
-        });
-    }
 }
 
 // 设置窗口位置

@@ -78,11 +78,13 @@ export component TimeTrans inherits Window {
         }
     }
 
-    // 子组件内容
+    // 子组件内容 2026-01-27 16:37:36
     Rectangle {
         width: root.width;
         height: root.height;
         border-radius: 8px;     // 圆角大小，按需调整
+        border-width: 1px;
+        border-color: grey;
         background: rgba(255,255,255,0.95); // 可换成其它颜色或透明度
         clip: true;             // 裁切子元素到圆角区域
 
