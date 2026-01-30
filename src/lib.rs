@@ -1,5 +1,7 @@
+mod utils;
 use chrono::{DateTime, NaiveDateTime, TimeZone, Utc};
 use chrono_tz::Tz;
+use single_instance::SingleInstance;
 use winit::dpi::{PhysicalPosition};
 use slint::{ComponentHandle, SharedString, VecModel};
 use i_slint_backend_winit::WinitWindowAccessor;
@@ -14,14 +16,21 @@ use rdev::{Event, listen};
 use rdev::EventType;
 use arboard::Clipboard;
 use regex::Regex;
-use tray_icon::{TrayIconBuilder,TrayIconEvent, menu::{Menu,MenuEvent}};
+use tray_icon::{TrayIconBuilder, menu::{Menu,MenuEvent}};
 use flexi_logger::{Logger, Duplicate, FileSpec, Criterion, Naming, Cleanup};
 use log::{info, warn, error};
+use utils::*;
 
 slint::include_modules!();
 
 // 程序主运行函数
 pub fn run() {
+    // 保证单实例
+    let instance = SingleInstance::new("my_unique_easy_tool_app_id").unwrap();
+    if !instance.is_single() {
+        show_message_box("提示", "应用已经在运行中，程序即将退出。");
+        return;
+    }
 
     // 初始化日志
     init_log().unwrap();
