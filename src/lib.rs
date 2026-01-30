@@ -1,6 +1,6 @@
 use chrono::{DateTime, NaiveDateTime, TimeZone, Utc};
 use chrono_tz::Tz;
-use winit::dpi::LogicalPosition;
+use winit::dpi::{PhysicalPosition};
 use slint::{ComponentHandle, SharedString, VecModel};
 use i_slint_backend_winit::WinitWindowAccessor;
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
@@ -246,7 +246,7 @@ fn set_position(time_window: &TimeTrans, x: f64, y: f64) {
         // 访问底层的 winit 窗口
         time_window.window().with_winit_window(|winit_window| {
             // 设置位置
-            winit_window.set_outer_position(LogicalPosition::new(x, y));
+            winit_window.set_outer_position(PhysicalPosition::new(x, y));
         });
     } 
 }
