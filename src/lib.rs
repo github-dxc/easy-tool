@@ -60,9 +60,11 @@ pub fn run() {
                         std::thread::sleep(Duration::from_millis(200));
                         let mut clipboard = Clipboard::new().unwrap();
                         window.set_input_value(clipboard.get_text().unwrap().into());
-                        // 设置窗口位置到鼠标位置
-                        info!("set window pos to x:{},y:{},copy:{}", cur_x, cur_y, clipboard.get_text().unwrap());
-                        set_position(&window, cur_x + 20f64, cur_y + 10f64);
+                        // 设置窗口位置到鼠标位置，如果已经触摸过则不移动
+                        if !window.get_has_hover() {
+                            info!("set window pos to x:{},y:{},copy:{}", cur_x, cur_y, clipboard.get_text().unwrap());
+                            set_position(&window, cur_x + 20f64, cur_y + 10f64);
+                        }
                     }).expect("Failed to send event to UI thread")
                 }
                 _ => {}
@@ -120,16 +122,16 @@ pub fn init_time_trans_window() -> TimeTrans {
 
     let tw = time_window.as_weak();
     time_window.on_close_window(move || {
-        if let Some(window) = tw.upgrade() {
-            let _ = window.hide();
+        if let Some(ui) = tw.upgrade() {
+            let _ = ui.hide();
         }
     });
 
     let tw1 = time_window.as_weak();
     time_window.on_show_window(move || {
-        if let Some(window) = tw1.upgrade() {
-            let _ = window.show();
-            hide_taskbar_icon(&window);
+        if let Some(ui) = tw1.upgrade() {
+            let _ = ui.show();
+            hide_taskbar_icon(&ui);
         }
     });
 
@@ -143,18 +145,29 @@ pub fn init_time_trans_window() -> TimeTrans {
     time_window.on_update_result(move |input_value,unit,zone|{
         let (result,unit) = trans_string_timestamp(input_value.as_str(), unit, zone.to_string());
         
-        if let Some(window) = tw2.upgrade() {
+        if let Some(ui) = tw2.upgrade() {
             match result {
                 Ok(result_value) => {
-                    window.set_result_value(result_value.into());
+                    ui.set_result_value(result_value.into());
                     if let Some(u) = unit {
-                        window.set_timestamp_unit(u);
+                        ui.set_timestamp_unit(u);
                     }
                 },
                 Err(str) => {
-                    window.set_result_value(str.into());
+                    ui.set_result_value(str.into());
                 }
             }
+        }
+    });
+
+    let tw3 = time_window.as_weak();
+    time_window.on_move_window(move || {
+        if let Some(ui) = tw3.upgrade() {
+            // 访问底层的 winit 窗口
+            ui.window().with_winit_window(|winit_window| {
+                // 调用系统原生的窗口拖拽功能
+                let _ = winit_window.drag_window();
+            });
         }
     });
 
@@ -252,7 +265,7 @@ fn hide_taskbar_icon(time_window: &TimeTrans) {
 
                         // 获取当前样式并转换成 u32 处理更自然
                         let old_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32;
-                        let new_style = (old_style | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE) & !WS_EX_APPWINDOW;
+                        let new_style = (old_style | WS_EX_TOOLWINDOW) & !WS_EX_APPWINDOW;
                         
                         if old_style != new_style {
                             SetWindowLongPtrW(hwnd, GWL_EXSTYLE, new_style as isize);
@@ -261,7 +274,7 @@ fn hide_taskbar_icon(time_window: &TimeTrans) {
                             SetWindowPos(
                                 hwnd, 
                                 0, 0, 0, 0, 0, 
-                                SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE
+                                SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER
                             );
                         }
                     }
