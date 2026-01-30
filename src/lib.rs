@@ -55,7 +55,7 @@ pub fn run() {
                 "\u{3}" => {
                     let cur_x = *mouse_x.lock().unwrap();
                     let cur_y = *mouse_y.lock().unwrap();
-                    weak.clone().upgrade_in_event_loop(move |window| {
+                    weak.upgrade_in_event_loop(move |window| {
                         // 读取文本
                         std::thread::sleep(Duration::from_millis(200));
                         let mut clipboard = Clipboard::new().unwrap();
