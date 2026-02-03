@@ -3,14 +3,13 @@ use chrono::{DateTime, NaiveDateTime, TimeZone, Utc};
 use chrono_tz::Tz;
 use single_instance::SingleInstance;
 use winit::dpi::{PhysicalPosition};
-use slint::{ComponentHandle, SharedString, VecModel};
+use slint::{ComponentHandle};
 use i_slint_backend_winit::WinitWindowAccessor;
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-use tray_icon::{Icon, TrayIcon};
+use tray_icon::{TrayIcon};
 use tray_icon::menu::MenuItem;
-use std::rc::Rc;
 use std::sync::{Arc, Mutex};
-use std::thread::{self, sleep};
+use std::thread::{self};
 use std::time::Duration;
 use rdev::{Event, listen};
 use rdev::EventType;
@@ -106,19 +105,6 @@ pub fn run() {
     slint::run_event_loop_until_quit().unwrap();
 }
 
-pub fn test_window() {
-    let test_window = TestWindow::new().unwrap();
-
-    let weak = test_window.as_weak();
-
-    test_window.on_button_clicked(move || {
-        let count = weak.unwrap().get_counter();
-        println!("按钮被点击了 {} 次", count);
-    });
-
-    test_window.run().unwrap();
-}
-
 // 时间转换窗口
 pub fn init_time_trans_window() -> TimeTrans {
     let time_window = TimeTrans::new().unwrap();
@@ -129,6 +115,8 @@ pub fn init_time_trans_window() -> TimeTrans {
     // 设置初始值
     time_window.set_timezone_index(0);
     time_window.set_timezone_label(TIMEZONE_LABELS[0].into());
+    const CLOSE_IMG: &[u8] = include_bytes!("../assets/icons/close.png");
+    time_window.set_close_img(load_slint_img(CLOSE_IMG));
 
     let tw = time_window.as_weak();
     time_window.on_close_window(move || {
@@ -252,27 +240,15 @@ pub fn init_tray_icon() -> (TrayIcon, Menu) {
     let tray_menu = Menu::new();
     let quit_item = MenuItem::with_id("quit", "退出", true, None);
     tray_menu.append(&quit_item).unwrap();
+    const ICON_IMG: &[u8] = include_bytes!("../assets/icons/icon.png");
     let tray_icon = TrayIconBuilder::new()
         .with_menu(Box::new(tray_menu.clone()))
         .with_menu_on_left_click(false)
         .with_tooltip("system-tray - tray icon library!")
-        .with_icon(load_icon("./assets/icons/icon.png"))
+        .with_icon(load_icon(ICON_IMG))
         .build()
         .unwrap();
     (tray_icon, tray_menu)
-}
-
-// 加载图标文件
-fn load_icon(path: &str) -> Icon {
-    // 打开图片文件 转换为RGBA8格式
-    let img = image::open(path)
-        .expect("无法打开图标文件")
-        .into_rgba8();
-    // 获取图片宽高
-    let (width, height) = img.dimensions();
-    // 获取原始像素字节流
-    let rgba = img.into_raw();
-    Icon::from_rgba(rgba, width, height).expect("创建图标失败")
 }
 
 // 设置窗口位置

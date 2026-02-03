@@ -20,6 +20,7 @@ export component TimeTrans inherits Window {
     property <int> close_time: 3;
     out property <bool> has_hover: false;
     in-out property <bool> has_copy: false;
+    in property <image> close_img;
 
     // 定义回调函数（rust函数）
     callback update_result(input: string, unit: bool, timezone_index: int);
@@ -108,6 +109,7 @@ export component TimeTrans inherits Window {
                 }
 
                 CloseButton {
+                    close_img: root.close_img;
                     clicked => {
                         root.close_window();
                         root.has_hover = false;
@@ -159,10 +161,10 @@ export component TimeTrans inherits Window {
                 Text {
                     font-size: 14px;
                     font-weight: 700;
-                    color: blue;
+                    color: #3B5998;
                     text: root.result_value;
                     horizontal-stretch: 1;
-                    horizontal-alignment: left;
+                    horizontal-alignment: center;
                     vertical-alignment: center;
                 }
 

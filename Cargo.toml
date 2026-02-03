@@ -30,6 +30,8 @@ single-instance = "0.3"
 
 [build-dependencies]
 slint-build = "1.14.1"
+# windows增加ico
+winresource = "0.1"
 
 # release优化
 [profile.release]

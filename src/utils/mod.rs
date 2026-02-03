@@ -1,3 +1,6 @@
+use slint::Image;
+use tray_icon::Icon;
+
 
 // 新增辅助函数 - 弹出系统对话框
 #[cfg(target_os = "windows")]
@@ -25,4 +28,31 @@ pub fn show_message_box(title: &str, message: &str) {
             MB_OK | MB_ICONINFORMATION, // 按钮类型和图标
         );
     }
+}
+
+// 加载slint图片资源
+pub fn load_slint_img(img: &[u8]) -> Image {
+    let close_image = image::load_from_memory(img)
+        .expect("无法打开关闭按钮图标文件")
+        .into_rgba8();
+    let (width, height) = close_image.dimensions();
+    let close_buffer = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(
+        close_image.as_raw(),
+        width,
+        height,
+    );
+    Image::from_rgba8(close_buffer)
+}
+
+// 加载图标文件
+pub fn load_icon(img: &[u8]) -> Icon {
+    // 打开图片文件 转换为RGBA8格式
+    let img = image::load_from_memory(img)
+        .expect("无法打开图标文件")
+        .into_rgba8();
+    // 获取图片宽高
+    let (width, height) = img.dimensions();
+    // 获取原始像素字节流
+    let rgba = img.into_raw();
+    Icon::from_rgba(rgba, width, height).expect("创建图标失败")
 }
