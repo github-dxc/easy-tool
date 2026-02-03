@@ -17,7 +17,7 @@ export component TimeTrans inherits Window {
     // 当前时区
     in-out property <string> timezone_label: "";
     
-    property <int> close_time: 3;
+    in-out property <int> close_time: 3;
     out property <bool> has_hover: false;
     in-out property <bool> has_copy: false;
     in property <image> close_img;
@@ -114,6 +114,8 @@ export component TimeTrans inherits Window {
                         root.close_window();
                         root.has_hover = false;
                         root.has_copy = false;
+                        root.input_value = "";
+                        root.result_value = "";
                     };
                 }
             }

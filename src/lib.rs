@@ -68,6 +68,7 @@ pub fn run() {
                         std::thread::sleep(Duration::from_millis(200));
                         let mut clipboard = Clipboard::new().unwrap();
                         window.set_input_value(clipboard.get_text().unwrap().into());
+                        window.set_close_time(3);
                         // 设置窗口位置到鼠标位置，如果已经触摸过则不移动
                         if !window.get_has_hover() {
                             info!("set window pos to x:{},y:{},copy:{}", cur_x, cur_y, clipboard.get_text().unwrap());
