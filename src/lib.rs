@@ -123,11 +123,12 @@ pub fn test_window() {
 pub fn init_time_trans_window() -> TimeTrans {
     let time_window = TimeTrans::new().unwrap();
 
-    let label_model = Rc::new(VecModel::from(TIMEZONE_LABELS.iter().map(|&label| SharedString::from(label)).collect::<Vec<SharedString>>()));
-    time_window.set_timezone_labels(label_model.clone().into());
+    // let label_model = Rc::new(VecModel::from(TIMEZONE_LABELS.iter().map(|&label| SharedString::from(label)).collect::<Vec<SharedString>>()));
+    // time_window.set_timezone_labels(label_model.clone().into());
 
-    let zone_model = Rc::new(VecModel::from(TIMEZONES.iter().map(|&zone| SharedString::from(zone)).collect::<Vec<SharedString>>()));
-    time_window.set_timezones(zone_model.clone().into());
+    // 设置初始值
+    time_window.set_timezone_index(0);
+    time_window.set_timezone_label(TIMEZONE_LABELS[0].into());
 
     let tw = time_window.as_weak();
     time_window.on_close_window(move || {
@@ -151,13 +152,14 @@ pub fn init_time_trans_window() -> TimeTrans {
     });
 
     let tw2 = time_window.as_weak();
-    time_window.on_update_result(move |input_value,unit,zone|{
-        let (result,unit) = trans_string_timestamp(input_value.as_str(), unit, zone.to_string());
+    time_window.on_update_result(move |input_value,unit,timezone_index|{
+        let (result,unit) = trans_string_timestamp(input_value.as_str(), unit, TIMEZONES[timezone_index as usize].to_string());
         
         if let Some(ui) = tw2.upgrade() {
             match result {
                 Ok(result_value) => {
                     ui.set_result_value(result_value.into());
+                    ui.set_has_copy(false);
                     if let Some(u) = unit {
                         ui.set_timestamp_unit(u);
                     }
@@ -177,6 +179,32 @@ pub fn init_time_trans_window() -> TimeTrans {
                 // 调用系统原生的窗口拖拽功能
                 let _ = winit_window.drag_window();
             });
+        }
+    });
+
+    let tw4 = time_window.as_weak();
+    time_window.on_last_timezone(move |mut i| {
+        if i == 0 {
+            i = (TIMEZONES.len() - 1) as i32;
+        } else {
+            i -= 1;
+        }
+        if let Some(ui) = tw4.upgrade() {
+            ui.set_timezone_index(i);
+            ui.set_timezone_label(TIMEZONE_LABELS[i as usize].into());
+        }
+    });
+
+    let tw5 = time_window.as_weak();
+    time_window.on_next_timezone(move |mut i| {
+        if i as usize >= TIMEZONES.len() - 1 {
+            i = 0;
+        } else {
+            i += 1;
+        }
+        if let Some(ui) = tw5.upgrade() {
+            ui.set_timezone_index(i);
+            ui.set_timezone_label(TIMEZONE_LABELS[i as usize].into());
         }
     });
 
@@ -394,16 +422,16 @@ const TIMEZONES: [&str; 12] = [
 ];
 
 const TIMEZONE_LABELS: [&str; 12] = [
-    "CST/北京",
-    "UTC",
-    "JST/东京",
-    "IST/新德里",
-    "SGT/新加坡",
-    "BST/伦敦",
-    "CET/巴黎",
-    "ET/纽约",
-    "CT/芝加哥",
-    "MT/丹佛",
-    "PT/洛杉矶",
-    "AET/悉尼",
+    "CST/+8",  // 中国标准时间
+    "UTC/+0",  // 协调世界时
+    "JST/+9",  // 日本标准时间
+    "IST/+5.5",// 印度标准时间
+    "SGT/+8",  // 新加坡标准时间
+    "BST/+1",  // 英国夏令时
+    "CET/+1",  // 中欧时间
+    "ET/-5",   // 东部时间
+    "CT/-6",   // 中部时间
+    "MT/-7",   // 山地时间
+    "PT/-8",   // 太平洋时间
+    "AET/+10", // 澳大利亚东部时间
 ];

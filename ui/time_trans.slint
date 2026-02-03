@@ -12,37 +12,38 @@ export component TimeTrans inherits Window {
     in-out property <string> input_value: "";
     in-out property <string> result_value: "";
     in-out property <bool> timestamp_unit: false;
+    // 当前时区下标
     in-out property <int> timezone_index: 0;
-    // 建议的 IANA 时区标识符
-    in-out property <[string]> timezones: [];
-    // 对应的显示标签
-    in-out property <[string]> timezone_labels: [];
+    // 当前时区
+    in-out property <string> timezone_label: "";
     
     property <int> close_time: 3;
     out property <bool> has_hover: false;
-    property <bool> has_copy: false;
+    in-out property <bool> has_copy: false;
 
     // 定义回调函数（rust函数）
-    callback update_result(input: string, unit: bool, timezone: string);
+    callback update_result(input: string, unit: bool, timezone_index: int);
     callback copy_to_clipboard(text: string);
     callback close_window();
     callback show_window();
     callback move_window();
+    callback last_timezone(i: int);
+    callback next_timezone(i: int);
 
     // 值变更回调
     changed input_value => {
         if (root.input_value != "") {
-            update_result(root.input_value, root.timestamp_unit, root.timezones[root.timezone_index]);
+            update_result(root.input_value, root.timestamp_unit, root.timezone_index);
         }
     }
     changed timestamp_unit => {
         if (root.input_value != "") {
-            update_result(root.input_value, root.timestamp_unit, root.timezones[root.timezone_index]);
+            update_result(root.input_value, root.timestamp_unit, root.timezone_index);
         }
     }
     changed timezone_index => {
         if (root.input_value != "") {
-            update_result(root.input_value, root.timestamp_unit, root.timezones[root.timezone_index]);
+            update_result(root.input_value, root.timestamp_unit, root.timezone_index);
         }
     }
     changed result_value => {
@@ -131,16 +132,12 @@ export component TimeTrans inherits Window {
                         height: 25px;
                         text: "<";
                         clicked => {
-                            if root.timezone_index == 0 {
-                                root.timezone_index = root.timezones.length - 1;
-                            } else {
-                                root.timezone_index -= 1;
-                            }
+                            root.last_timezone(root.timezone_index);
                         }
                     }
 
                     Text {
-                        text: timezone_labels[root.timezone_index];
+                        text: root.timezone_label;
                         width: 50px;
                         horizontal-alignment: left;
                         vertical-alignment: center;
@@ -150,11 +147,7 @@ export component TimeTrans inherits Window {
                         height: 25px;
                         text: ">";
                         clicked => {
-                            if root.timezone_index >= root.timezones.length - 1 {
-                                root.timezone_index = 0;
-                            } else {
-                                root.timezone_index += 1;
-                            }
+                            root.next_timezone(root.timezone_index);
                         }
                     }
                 }
@@ -176,7 +169,7 @@ export component TimeTrans inherits Window {
                 Button {
                     width: 55px;
                     height: 25px;
-                    text: root.has_copy?"✔":"Copy";
+                    text: root.has_copy?"Done":"Copy";
                     enabled: root.result_value != "";
                     clicked => {
                         copy_to_clipboard(root.result_value);
