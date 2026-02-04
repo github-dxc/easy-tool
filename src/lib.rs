@@ -71,8 +71,22 @@ pub fn run() {
                         window.set_close_time(3);
                         // 设置窗口位置到鼠标位置，如果已经触摸过则不移动
                         if !window.get_has_hover() {
-                            info!("set window pos to x:{},y:{},copy:{}", cur_x, cur_y, clipboard.get_text().unwrap());
-                            set_position(&window, cur_x + 20f64, cur_y + 10f64);
+                            let mut move_x: f64 = cur_x;
+                            let mut move_y: f64 = cur_y;
+                            if let Some((disp_w, disp_h)) = get_display_size(&window) {
+                                if move_x + 280f64 > disp_w {
+                                    move_x = disp_w - 280f64;
+                                }else {
+                                    move_x = move_x + 20f64;
+                                }
+                                if move_y + 135f64 > disp_h {
+                                    move_y = disp_h - 135f64;
+                                }else {
+                                    move_y = move_y + 10f64;
+                                }
+                            }
+                            info!("set window pos to x:{},y:{},copy:{}", move_x, move_y, clipboard.get_text().unwrap());
+                            set_position(&window, move_x, move_y);
                         }
                     }).expect("Failed to send event to UI thread")
                 }
@@ -295,6 +309,24 @@ fn hide_taskbar_icon(time_window: &TimeTrans) {
                 }
             }
         });
+    }
+}
+
+// 获取显示屏大小
+fn get_display_size(time_window: &TimeTrans) -> Option<(f64, f64)> {
+    let mut width = 0f64;
+    let mut height = 0f64;
+    time_window.window().with_winit_window(|winit_window| {
+        if let Some(monitor) = winit_window.current_monitor() {
+            let size = monitor.size();
+            width = size.width as f64;
+            height = size.height as f64;
+        }
+    });
+    if width > 0f64 && height > 0f64 {
+        Some((width, height))
+    } else {
+        None
     }
 }
 
