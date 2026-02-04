@@ -67,7 +67,7 @@ pub fn run() {
                         // 读取文本
                         std::thread::sleep(Duration::from_millis(200));
                         let mut clipboard = Clipboard::new().unwrap();
-                        window.set_input_value(clipboard.get_text().unwrap().into());
+                        window.set_input_value(clipboard.get_text().unwrap().trim().into());//去掉前后的空格
                         window.set_close_time(3);
                         // 设置窗口位置到鼠标位置，如果已经触摸过则不移动
                         if !window.get_has_hover() {
@@ -361,6 +361,21 @@ fn trans_string_timestamp(input: &str, unit: bool, zone: String) -> (Result<Stri
     let re = Regex::new(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$").unwrap();
     if re.is_match(input) {
         if let Ok(naive_dt) = NaiveDateTime::parse_from_str(input, "%Y-%m-%d %H:%M:%S") {
+            let dt_in_tz = tz.from_local_datetime(&naive_dt).single();
+            if let Some(dt) = dt_in_tz {
+                let mut timestamp = dt.timestamp();
+                if unit {
+                    timestamp *= 1000;
+                }
+                return (Ok(timestamp.to_string()), None);
+            }
+        }
+    }
+
+    // %Y-%m-%d %H:%M 时间字符串
+    let re = Regex::new(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$").unwrap();
+    if re.is_match(input) {
+        if let Ok(naive_dt) = NaiveDateTime::parse_from_str(&(input.to_string() + ":00"), "%Y-%m-%d %H:%M:%S") {
             let dt_in_tz = tz.from_local_datetime(&naive_dt).single();
             if let Some(dt) = dt_in_tz {
                 let mut timestamp = dt.timestamp();
