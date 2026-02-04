@@ -57,7 +57,7 @@ pub fn run() {
         }
         // 特殊处理按键事件
         if let Some(name) = event.name {
-            info!("event name: {:?}", name);
+            // info!("event name: {:?}", name);
             match name.as_str() {
                 // 处理 Ctrl+C 组合键
                 "\u{3}" => {
