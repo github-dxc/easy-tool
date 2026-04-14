@@ -5,12 +5,12 @@ edition = "2024"
 
 [dependencies]
 slint = { version = "1.15.1", features = ["renderer-skia"] }
-chrono = { version = "0.4", features = ["serde"] }
+chrono = { version = "0.4", default-features = false, features = ["serde", "clock", "std"] }
 chrono-tz = "0.10.3"
 rdev = "0.5.3"
 log = "0.4.27"
 flexi_logger = "0.23"
-image = "0.24"
+image = { version = "0.24", default-features = false, features = ["png", "jpeg"] }
 tray-icon = "0.21.2"
 # 正则表达式
 regex = "1.12.2"
@@ -29,6 +29,10 @@ single-instance = "0.3"
 slint-build = "1.15.1"
 # windows增加ico
 winresource = "0.1"
+
+[profile.dev]
+opt-level = 1 
+lto = "thin"
 
 # release优化
 [profile.release]
