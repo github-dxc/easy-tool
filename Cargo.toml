@@ -3,11 +3,8 @@ name = "easy-tool"
 version = "0.1.0"
 edition = "2024"
 
-[target.x86_64-pc-windows-msvc]
-linker = "rust-lld.exe"
-
 [dependencies]
-slint = { version = "1.14", features = ["renderer-skia"] }
+slint = { version = "1.15.1", features = ["renderer-skia"] }
 chrono = { version = "0.4", features = ["serde"] }
 chrono-tz = "0.10.3"
 rdev = "0.5.3"
@@ -20,8 +17,8 @@ regex = "1.12.2"
 # 跨平台粘贴板库
 arboard = "2"
 winit = "0.30.12"
-# 用于访问 winit 特性
-i-slint-backend-winit = "1.7"
+# 用于访问 winit 特性（跟随slint版本）
+i-slint-backend-winit = "1.15.1"
 # 用于获取原始窗口句柄
 raw-window-handle = "0.6"
 # 用于调用 Windows 底层 API
@@ -29,7 +26,7 @@ windows-sys = { version = "0.52", features = ["Win32_UI_WindowsAndMessaging"] }
 single-instance = "0.3"
 
 [build-dependencies]
-slint-build = "1.14.1"
+slint-build = "1.15.1"
 # windows增加ico
 winresource = "0.1"
 
