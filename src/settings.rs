@@ -5,7 +5,10 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppSettings {
+    #[serde(default = "default_enabled_copy_timestamp")]
     pub copy_timestamp: CopyTimestampSettings,
+    #[serde(default = "default_enabled_clipboard_history")]
+    pub clipboard_history: ClipboardHistorySettings,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -13,12 +16,26 @@ pub struct CopyTimestampSettings {
     pub enabled: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClipboardHistorySettings {
+    pub enabled: bool,
+}
+
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
             copy_timestamp: CopyTimestampSettings { enabled: true },
+            clipboard_history: ClipboardHistorySettings { enabled: true },
         }
     }
+}
+
+fn default_enabled_copy_timestamp() -> CopyTimestampSettings {
+    CopyTimestampSettings { enabled: true }
+}
+
+fn default_enabled_clipboard_history() -> ClipboardHistorySettings {
+    ClipboardHistorySettings { enabled: true }
 }
 
 #[derive(Debug, Clone)]

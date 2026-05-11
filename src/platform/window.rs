@@ -53,3 +53,24 @@ pub fn hide_taskbar_icon(time_window: &TimeTrans) {
         }
     });
 }
+
+#[cfg(target_os = "windows")]
+pub fn foreground_window_handle() -> Option<isize> {
+    let hwnd = unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow() };
+    (hwnd != 0).then_some(hwnd)
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn foreground_window_handle() -> Option<isize> {
+    None
+}
+
+#[cfg(target_os = "windows")]
+pub fn activate_window(hwnd: isize) -> bool {
+    unsafe { windows_sys::Win32::UI::WindowsAndMessaging::SetForegroundWindow(hwnd) != 0 }
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn activate_window(_hwnd: isize) -> bool {
+    false
+}

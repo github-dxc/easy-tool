@@ -1,0 +1,190 @@
+import { Button, TextEdit } from "std-widgets.slint";
+import "../assets/font/AlibabaPuHuiTi-3-55-Regular.ttf";
+
+export struct ClipboardHistoryRow {
+    title: string,
+    detail: string,
+    full_text: string,
+    kind: string,
+    preview: image,
+    has_preview: bool,
+}
+
+export component ClipboardHistoryWindow inherits Window {
+    width: 520px;
+    height: 560px;
+    always-on-top: true;
+    title: "复制历史";
+    default-font-family: "Alibaba PuHuiTi 3.0";
+
+    in property <[ClipboardHistoryRow]> entries;
+    in-out property <int> selected_index: 0;
+    in-out property <string> current_kind: "";
+    in-out property <string> current_detail: "";
+    in-out property <string> current_full_text: "";
+    in-out property <image> current_preview;
+    in-out property <bool> current_has_preview: false;
+
+    callback paste(index: int);
+    callback cancel();
+
+    Rectangle {
+        background: #F7F7F7;
+        border-color: #D0D0D0;
+        border-width: 1px;
+
+        VerticalLayout {
+            padding: 12px;
+            spacing: 10px;
+
+            Rectangle {
+                height: 200px;
+                background: white;
+                border-color: #DADCE0;
+                border-width: 1px;
+                border-radius: 6px;
+                clip: true;
+
+                if entries.length == 0: Text {
+                    text: "暂无复制记录";
+                    color: #70757A;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+
+                Flickable {
+                    width: parent.width;
+                    height: parent.height;
+                    viewport-height: list.height;
+
+                    VerticalLayout {
+                        width: parent.width;
+                        list := Rectangle {
+                            width: parent.width;
+                            height: entries.length * 34px;
+
+                            for entry[index] in entries : Rectangle {
+                                width: list.width;
+                                y: index * 34px;
+                                height: 34px;
+                                border-width: 1px;
+                                border-color: index == selected_index ? #4C8BF5 : #E6E8EB;
+                                background: index == selected_index ? #EDF4FF : white;
+
+                                TouchArea {
+                                    clicked => {
+                                        root.selected_index = index;
+                                        root.current_kind = entry.kind;
+                                        root.current_detail = entry.detail;
+                                        root.current_full_text = entry.full_text;
+                                        root.current_preview = entry.preview;
+                                        root.current_has_preview = entry.has_preview;
+                                    }
+                                }
+
+                                HorizontalLayout {
+                                    width: parent.width;
+                                    height: parent.height;
+                                    padding-left: 8px;
+                                    padding-right: 8px;
+                                    spacing: 8px;
+
+                                    Rectangle {
+                                        width: 44px;
+                                        height: 22px;
+                                        y: (parent.height - self.height) / 2;
+                                        background: entry.kind == "text" ? #E8F0FE : entry.kind == "image" ? #E6F4EA : #FEF7E0;
+                                        border-color: entry.kind == "text" ? #4C8BF5 : entry.kind == "image" ? #34A853 : #F9AB00;
+                                        border-width: 1px;
+                                        border-radius: 4px;
+
+                                        Text {
+                                            text: entry.kind == "text" ? "TEXT" : entry.kind == "image" ? "IMG" : "FILE";
+                                            color: #5F6368;
+                                            font-size: 10px;
+                                            font-weight: 700;
+                                            horizontal-alignment: center;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+
+                                    Text {
+                                        text: index + 1;
+                                        width: 8px;
+                                        color: #5F6368;
+                                        font-size: 13px;
+                                        vertical-alignment: center;
+                                    }
+
+                                    Text {
+                                        text: entry.title;
+                                        color: #202124;
+                                        font-size: 14px;
+                                        vertical-alignment: center;
+                                        horizontal-stretch: 1;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            Rectangle {
+                height: 250px;
+                background: #FFFFFF;
+                border-color: #DADCE0;
+                border-width: 1px;
+                border-radius: 6px;
+                clip: true;
+
+                if entries.length == 0: Text {
+                    text: "";
+                }
+
+                if current_has_preview: Rectangle {
+                    background: #F1F3F4;
+
+                    Image {
+                        width: 250px;
+                        height: 250px;
+                        x: (parent.width - self.width) / 2;
+                        source: root.current_preview;
+                        image-fit: contain;
+                    }
+                }
+
+                if !current_has_preview: TextEdit {
+                    width: parent.width;
+                    height: parent.height;
+                    read-only: true;
+                    wrap: word-wrap;
+                    font-size: 14px;
+                    text: root.current_full_text != "" ? root.current_full_text : root.current_detail;
+                }
+            }
+
+            HorizontalLayout {
+                spacing: 8px;
+                alignment: end;
+
+                Button {
+                    height: 24px;
+                    text: "粘贴";
+                    enabled: entries.length > 0;
+                    clicked => {
+                        root.paste(root.selected_index);
+                    }
+                }
+
+                Button {
+                    height: 24px;
+                    text: "取消";
+                    clicked => {
+                        root.cancel();
+                    }
+                }
+            }
+        }
+    }
+}
