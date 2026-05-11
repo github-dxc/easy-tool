@@ -14,6 +14,7 @@ use crate::infrastructure::logging::init_logging;
 use crate::infrastructure::tray::{init_tray_icon, start_tray_event_pump};
 use crate::platform::dialog::show_message_box;
 use crate::platform::window::{display_size, set_position};
+use crate::settings::SettingsStore;
 
 pub fn run() {
     let instance =
@@ -25,15 +26,24 @@ pub fn run() {
 
     init_logging().expect("failed to initialize logging");
 
+    let settings_store = SettingsStore::new();
+    let settings = Arc::new(Mutex::new(
+        settings_store
+            .load_or_create()
+            .expect("failed to load settings"),
+    ));
+    info!("settings path: {}", settings_store.path().display());
+
     let time_trans_window = init_time_trans_window();
     let weak_window = time_trans_window.as_weak();
-    let (_tray_icon, _tray_menu) = init_tray_icon();
+    let tray_state = init_tray_icon(&settings.lock().unwrap());
 
     let mouse_x = Arc::new(Mutex::new(0f64));
     let mouse_y = Arc::new(Mutex::new(0f64));
     start_global_input_listener({
         let mouse_x = Arc::clone(&mouse_x);
         let mouse_y = Arc::clone(&mouse_y);
+        let settings = Arc::clone(&settings);
 
         move |event| {
             if let EventType::MouseMove { x, y } = event.event_type {
@@ -42,6 +52,10 @@ pub fn run() {
             }
 
             if event.name.as_deref() == Some("\u{3}") {
+                if !settings.lock().unwrap().copy_timestamp.enabled {
+                    return Ok(());
+                }
+
                 let cur_x = *mouse_x.lock().unwrap();
                 let cur_y = *mouse_y.lock().unwrap();
                 weak_window
@@ -67,7 +81,7 @@ pub fn run() {
     })
     .expect("failed to start global input listener");
 
-    let _tray_timer = start_tray_event_pump();
+    let _tray_timer = start_tray_event_pump(&tray_state, Arc::clone(&settings), settings_store);
     slint::run_event_loop_until_quit().unwrap();
 }
 

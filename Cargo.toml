@@ -24,6 +24,9 @@ raw-window-handle = "0.6"
 # 用于调用 Windows 底层 API
 windows-sys = { version = "0.52", features = ["Win32_UI_WindowsAndMessaging"] }
 single-instance = "0.3"
+dirs = "6.0.0"
+serde = { version = "1.0.228", features = ["derive"] }
+toml = "0.8.2"
 
 [build-dependencies]
 slint-build = "1.15.1"
