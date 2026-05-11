@@ -1,5 +1,3 @@
-use std::{thread::sleep, time::Duration};
-
 use easy_tool::*;
 
 #[test]

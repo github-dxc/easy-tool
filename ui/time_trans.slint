@@ -1,5 +1,6 @@
 import { LineEdit, VerticalBox, ComboBox, Button, Switch } from "std-widgets.slint";
 import { CloseButton } from "components/close.slint";
+import "../assets/font/AlibabaPuHuiTi-3-55-Regular.ttf";
 
 export component TimeTrans inherits Window {
     no-frame: true;
@@ -7,6 +8,7 @@ export component TimeTrans inherits Window {
     width: 210px;
     height: 100px;
     background: transparent;
+    default-font-family: "Alibaba PuHuiTi 3.0";
 
     // 定义变量
     in-out property <string> input_value: "";
