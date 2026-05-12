@@ -30,6 +30,7 @@ export component ClipboardHistoryWindow inherits Window {
     in-out property <int> current_preview_height: 0;
 
     callback paste(index: int);
+    callback delete_entry(index: int);
     callback cancel();
 
     Rectangle {
@@ -76,6 +77,8 @@ export component ClipboardHistoryWindow inherits Window {
                                 background: index == selected_index ? #EDF4FF : white;
 
                                 TouchArea {
+                                    width: parent.width - 36px;
+                                    height: parent.height;
                                     clicked => {
                                         root.selected_index = index;
                                         root.current_kind = entry.kind;
@@ -119,7 +122,7 @@ export component ClipboardHistoryWindow inherits Window {
 
                                     Text {
                                         text: index + 1;
-                                        width: 8px;
+                                        width: 12px;
                                         color: #5F6368;
                                         font-size: 13px;
                                         vertical-alignment: center;
@@ -131,6 +134,29 @@ export component ClipboardHistoryWindow inherits Window {
                                         font-size: 14px;
                                         vertical-alignment: center;
                                         horizontal-stretch: 1;
+                                    }
+
+                                    // 删除按钮
+                                    VerticalLayout {
+                                        alignment: center; // 垂直方向居中对齐
+                                        Rectangle {
+                                            width: 24px;
+                                            height: 22px;
+                                            background: touch.pressed ? #eee : touch.has-hover ? #f5f5f5 : transparent;
+                                            border-radius: 4px;
+
+                                            Text {
+                                                text: "×";
+                                                font-size: 16px;
+                                                // 核心居中属性
+                                                horizontal-alignment: center;
+                                                vertical-alignment: center;
+                                            }
+
+                                            touch := TouchArea {
+                                                clicked => { root.delete_entry(index); }
+                                            }
+                                        }
                                     }
                                 }
                             }

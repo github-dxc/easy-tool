@@ -26,8 +26,9 @@ pub fn init_clipboard_history_window(
     });
 
     let weak = window.as_weak();
+    let history_for_paste = Arc::clone(&history);
     window.on_paste(move |index| {
-        let item = history.lock().unwrap().get(index as usize);
+        let item = history_for_paste.lock().unwrap().get(index as usize);
         if let Some(item) = item {
             if let Err(err) = put_clipboard_item(&item) {
                 log::error!("paste history item failed: {err}");
@@ -57,6 +58,31 @@ pub fn init_clipboard_history_window(
         });
     });
 
+    let history_for_delete = Arc::clone(&history);
+    let weak = window.as_weak();
+    window.on_delete_entry(move |index| {
+        if index < 0 {
+            return;
+        }
+
+        let removed = history_for_delete
+            .lock()
+            .unwrap()
+            .remove(index as usize)
+            .is_some();
+        if !removed {
+            return;
+        }
+
+        if let Some(ui) = weak.upgrade() {
+            refresh_clipboard_history_window_with_selection(
+                &ui,
+                &history_for_delete,
+                index as usize,
+            );
+        }
+    });
+
     window
 }
 
@@ -72,6 +98,14 @@ pub fn refresh_clipboard_history_window(
     window: &ClipboardHistoryWindow,
     history: &Arc<Mutex<ClipboardHistory>>,
 ) {
+    refresh_clipboard_history_window_with_selection(window, history, 0);
+}
+
+fn refresh_clipboard_history_window_with_selection(
+    window: &ClipboardHistoryWindow,
+    history: &Arc<Mutex<ClipboardHistory>>,
+    selected_index: usize,
+) {
     let rows = history
         .lock()
         .unwrap()
@@ -80,14 +114,16 @@ pub fn refresh_clipboard_history_window(
         .map(row_from_item)
         .collect::<Vec<_>>();
 
-    if let Some(first) = rows.first() {
-        window.set_current_kind(first.kind.clone());
-        window.set_current_detail(first.detail.clone());
-        window.set_current_full_text(first.full_text.clone());
-        window.set_current_preview(first.preview.clone());
-        window.set_current_has_preview(first.has_preview);
-        window.set_current_preview_width(first.preview_width);
-        window.set_current_preview_height(first.preview_height);
+    let selected_index = selected_index.min(rows.len().saturating_sub(1));
+
+    if let Some(selected) = rows.get(selected_index) {
+        window.set_current_kind(selected.kind.clone());
+        window.set_current_detail(selected.detail.clone());
+        window.set_current_full_text(selected.full_text.clone());
+        window.set_current_preview(selected.preview.clone());
+        window.set_current_has_preview(selected.has_preview);
+        window.set_current_preview_width(selected.preview_width);
+        window.set_current_preview_height(selected.preview_height);
     } else {
         window.set_current_kind("".into());
         window.set_current_detail("".into());
@@ -99,7 +135,7 @@ pub fn refresh_clipboard_history_window(
     }
 
     window.set_entries(ModelRc::from(Rc::new(VecModel::from(rows))));
-    window.set_selected_index(0);
+    window.set_selected_index(selected_index as i32);
 }
 
 fn row_from_item(item: ClipboardHistoryItem) -> ClipboardHistoryRow {

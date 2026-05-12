@@ -45,6 +45,10 @@ impl ClipboardHistory {
         self.items.get(index).cloned()
     }
 
+    pub fn remove(&mut self, index: usize) -> Option<ClipboardHistoryItem> {
+        self.items.remove(index)
+    }
+
     pub fn items(&self) -> Vec<ClipboardHistoryItem> {
         self.items.iter().cloned().collect()
     }
