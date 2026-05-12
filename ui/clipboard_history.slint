@@ -8,11 +8,13 @@ export struct ClipboardHistoryRow {
     kind: string,
     preview: image,
     has_preview: bool,
+    preview_width: int,
+    preview_height: int,
 }
 
 export component ClipboardHistoryWindow inherits Window {
     width: 520px;
-    height: 520px;
+    height: 570px;
     always-on-top: true;
     title: "复制历史";
     default-font-family: "Alibaba PuHuiTi 3.0";
@@ -24,6 +26,8 @@ export component ClipboardHistoryWindow inherits Window {
     in-out property <string> current_full_text: "";
     in-out property <image> current_preview;
     in-out property <bool> current_has_preview: false;
+    in-out property <int> current_preview_width: 0;
+    in-out property <int> current_preview_height: 0;
 
     callback paste(index: int);
     callback cancel();
@@ -79,6 +83,8 @@ export component ClipboardHistoryWindow inherits Window {
                                         root.current_full_text = entry.full_text;
                                         root.current_preview = entry.preview;
                                         root.current_has_preview = entry.has_preview;
+                                        root.current_preview_width = entry.preview_width;
+                                        root.current_preview_height = entry.preview_height;
                                     }
                                     double-clicked => {
                                         root.paste(root.selected_index);
@@ -134,7 +140,7 @@ export component ClipboardHistoryWindow inherits Window {
             }
 
             Rectangle {
-                height: 250px;
+                height: 300px;
                 background: #FFFFFF;
                 border-color: #DADCE0;
                 border-width: 1px;
@@ -149,9 +155,10 @@ export component ClipboardHistoryWindow inherits Window {
                     background: #F1F3F4;
 
                     Image {
-                        width: 250px;
-                        height: 250px;
+                        width: root.current_preview_width * 1px;
+                        height: root.current_preview_height * 1px;
                         x: (parent.width - self.width) / 2;
+                        y: (parent.height - self.height) / 2;
                         source: root.current_preview;
                         image-fit: contain;
                     }

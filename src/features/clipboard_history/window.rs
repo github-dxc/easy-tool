@@ -86,12 +86,16 @@ pub fn refresh_clipboard_history_window(
         window.set_current_full_text(first.full_text.clone());
         window.set_current_preview(first.preview.clone());
         window.set_current_has_preview(first.has_preview);
+        window.set_current_preview_width(first.preview_width);
+        window.set_current_preview_height(first.preview_height);
     } else {
         window.set_current_kind("".into());
         window.set_current_detail("".into());
         window.set_current_full_text("".into());
         window.set_current_preview(Image::default());
         window.set_current_has_preview(false);
+        window.set_current_preview_width(0);
+        window.set_current_preview_height(0);
     }
 
     window.set_entries(ModelRc::from(Rc::new(VecModel::from(rows))));
@@ -101,18 +105,22 @@ pub fn refresh_clipboard_history_window(
 fn row_from_item(item: ClipboardHistoryItem) -> ClipboardHistoryRow {
     let preview = preview_from_item(&item);
     let has_preview = preview.is_some();
+    let (preview, preview_width, preview_height) =
+        preview.unwrap_or_else(|| (Image::default(), 0, 0));
 
     ClipboardHistoryRow {
         title: item.title().into(),
         detail: item.detail().into(),
         full_text: item.full_text().into(),
         kind: item.kind().into(),
-        preview: preview.unwrap_or_default(),
+        preview,
         has_preview,
+        preview_width,
+        preview_height,
     }
 }
 
-fn preview_from_item(item: &ClipboardHistoryItem) -> Option<Image> {
+fn preview_from_item(item: &ClipboardHistoryItem) -> Option<(Image, i32, i32)> {
     if let Some(image) = item.image_data() {
         return Some(image_preview(image));
     }
@@ -130,24 +138,44 @@ fn preview_from_item(item: &ClipboardHistoryItem) -> Option<Image> {
     None
 }
 
-fn image_preview(image: arboard::ImageData<'static>) -> Image {
+fn image_preview(image: arboard::ImageData<'static>) -> (Image, i32, i32) {
     let Some(source) = image::RgbaImage::from_raw(
         image.width as u32,
         image.height as u32,
         image.bytes.into_owned(),
     ) else {
-        return Image::default();
+        return (Image::default(), 0, 0);
     };
 
     rgba_preview(&source)
 }
 
-fn rgba_preview(source: &image::RgbaImage) -> Image {
-    let preview = image::imageops::thumbnail(source, 200, 200);
+fn rgba_preview(source: &image::RgbaImage) -> (Image, i32, i32) {
+    const MAX_PREVIEW_WIDTH: u32 = 400;
+    const MAX_PREVIEW_HEIGHT: u32 = 300;
+
+    let (source_width, source_height) = source.dimensions();
+    let preview = if source_width <= MAX_PREVIEW_WIDTH && source_height <= MAX_PREVIEW_HEIGHT {
+        source.clone()
+    } else {
+        let width_ratio = MAX_PREVIEW_WIDTH as f64 / source_width as f64;
+        let height_ratio = MAX_PREVIEW_HEIGHT as f64 / source_height as f64;
+        let scale = width_ratio.min(height_ratio);
+        let target_width = ((source_width as f64 * scale).round() as u32).max(1);
+        let target_height = ((source_height as f64 * scale).round() as u32).max(1);
+
+        image::imageops::resize(
+            source,
+            target_width,
+            target_height,
+            image::imageops::FilterType::Lanczos3,
+        )
+    };
+
     let (width, height) = preview.dimensions();
     log::info!("created image history preview: {width}x{height}");
     let buffer = SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(preview.as_raw(), width, height);
-    Image::from_rgba8(buffer)
+    (Image::from_rgba8(buffer), width as i32, height as i32)
 }
 
 fn is_image_file(path: &std::path::Path) -> bool {
