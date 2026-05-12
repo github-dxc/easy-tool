@@ -12,7 +12,7 @@ export struct ClipboardHistoryRow {
 
 export component ClipboardHistoryWindow inherits Window {
     width: 520px;
-    height: 560px;
+    height: 520px;
     always-on-top: true;
     title: "复制历史";
     default-font-family: "Alibaba PuHuiTi 3.0";
@@ -79,6 +79,9 @@ export component ClipboardHistoryWindow inherits Window {
                                         root.current_full_text = entry.full_text;
                                         root.current_preview = entry.preview;
                                         root.current_has_preview = entry.has_preview;
+                                    }
+                                    double-clicked => {
+                                        root.paste(root.selected_index);
                                     }
                                 }
 
