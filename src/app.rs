@@ -9,12 +9,12 @@ use single_instance::SingleInstance;
 use slint::ComponentHandle;
 
 use crate::config::APP_INSTANCE_ID;
-use crate::features::clipboard_history::clipboard::capture_clipboard_item;
 use crate::features::clipboard_history::history::ClipboardHistory;
 use crate::features::clipboard_history::window::{
-    init_clipboard_history_window, refresh_clipboard_history_window, show_clipboard_history_window,
+    init_clipboard_history_window, show_clipboard_history_window,
 };
 use crate::features::time_trans::window::init_time_trans_window;
+use crate::infrastructure::clipboard_listener::start_clipboard_history_listener;
 use crate::infrastructure::global_input::start_global_input_listener;
 use crate::infrastructure::logging::init_logging;
 use crate::infrastructure::tray::{init_tray_icon, start_tray_event_pump};
@@ -52,6 +52,12 @@ pub fn run() {
     );
     let weak_history_window = clipboard_history_window.as_weak();
     let tray_state = init_tray_icon(&settings.lock().unwrap());
+    start_clipboard_history_listener(
+        Arc::clone(&clipboard_history),
+        Arc::clone(&settings),
+        weak_history_window.clone(),
+    )
+    .expect("failed to start clipboard history listener");
 
     let mouse_x = Arc::new(Mutex::new(0f64));
     let mouse_y = Arc::new(Mutex::new(0f64));
@@ -64,7 +70,6 @@ pub fn run() {
         let shortcut_state = Arc::clone(&shortcut_state);
         let paste_target_window = Arc::clone(&paste_target_window);
         let suppress_shortcuts = Arc::clone(&suppress_shortcuts);
-        let weak_history_window_for_copy = weak_history_window.clone();
 
         move |event| {
             if let EventType::MouseMove { x, y } = event.event_type {
@@ -88,16 +93,12 @@ pub fn run() {
 
             if event.name.as_deref() == Some("\u{3}") {
                 let settings_snapshot = settings.lock().unwrap().clone();
-                if !settings_snapshot.copy_timestamp.enabled
-                    && !settings_snapshot.clipboard_history.enabled
-                {
+                if !settings_snapshot.copy_timestamp.enabled {
                     return Ok(());
                 }
 
                 let cur_x = *mouse_x.lock().unwrap();
                 let cur_y = *mouse_y.lock().unwrap();
-                let history = Arc::clone(&clipboard_history);
-                let weak_history_window_for_copy = weak_history_window_for_copy.clone();
                 weak_window
                     .upgrade_in_event_loop(move |window| {
                         std::thread::sleep(Duration::from_millis(200));
@@ -105,28 +106,14 @@ pub fn run() {
                         let mut clipboard = Clipboard::new().unwrap();
                         let text = clipboard.get_text().ok();
 
-                        if settings_snapshot.clipboard_history.enabled {
-                            if let Some(item) = capture_clipboard_item() {
-                                history.lock().unwrap().push(item);
-                                if let Some(history_window) = weak_history_window_for_copy.upgrade()
-                                    && history_window.window().is_visible()
-                                {
-                                    refresh_clipboard_history_window(&history_window, &history);
-                                }
-                            }
-                        }
+                        if let Some(text) = text {
+                            window.set_input_value(text.trim().into());
+                            window.set_close_time(3);
 
-                        if settings_snapshot.copy_timestamp.enabled {
-                            if let Some(text) = text {
-                                window.set_input_value(text.trim().into());
-                                window.set_close_time(3);
-
-                                if !window.get_has_hover() {
-                                    let (move_x, move_y) =
-                                        next_window_position(&window, cur_x, cur_y);
-                                    info!("set window pos to x:{move_x},y:{move_y},copy:{text}");
-                                    set_position(&window, move_x, move_y);
-                                }
+                            if !window.get_has_hover() {
+                                let (move_x, move_y) = next_window_position(&window, cur_x, cur_y);
+                                info!("set window pos to x:{move_x},y:{move_y},copy:{text}");
+                                set_position(&window, move_x, move_y);
                             }
                         }
                     })

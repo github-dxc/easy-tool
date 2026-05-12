@@ -16,6 +16,7 @@ tray-icon = "0.21.2"
 regex = "1.12.2"
 # 跨平台粘贴板库
 arboard = "2"
+clipboard-master = "4.0.0"
 winit = "0.30.12"
 # 用于访问 winit 特性（跟随slint版本）
 i-slint-backend-winit = "1.15.1"
