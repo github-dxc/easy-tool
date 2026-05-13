@@ -1,4 +1,5 @@
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use log::info;
 use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem};
@@ -71,9 +72,9 @@ pub fn start_tray_event_pump(
 
     tray_timer.start(
         slint::TimerMode::Repeated,
-        std::time::Duration::from_millis(16),
+        Duration::from_millis(16),
         move || {
-            if let Ok(event) = MenuEvent::receiver().try_recv() {
+            while let Ok(event) = MenuEvent::receiver().try_recv() {
                 info!("menu event: {event:?}");
 
                 if event.id.as_ref() == COPY_TIMESTAMP_MENU_ID {
@@ -94,10 +95,32 @@ pub fn start_tray_event_pump(
                     }
                 } else if event.id.as_ref() == QUIT_MENU_ID {
                     info!("quit application");
-                    slint::quit_event_loop().unwrap();
+                    request_application_quit();
+                    break;
                 }
             }
         },
     );
     tray_timer
+}
+
+fn request_application_quit() {
+    std::thread::Builder::new()
+        .name("quit-fallback".into())
+        .spawn(|| {
+            std::thread::sleep(Duration::from_millis(500));
+            log::warn!("force exit after quit request");
+            log::logger().flush();
+            std::process::exit(0);
+        })
+        .unwrap_or_else(|err| {
+            log::error!("spawn quit fallback failed: {err}");
+            std::process::exit(0);
+        });
+
+    if let Err(err) = slint::quit_event_loop() {
+        log::error!("quit event loop failed: {err}");
+        log::logger().flush();
+        std::process::exit(0);
+    }
 }
