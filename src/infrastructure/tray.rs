@@ -1,3 +1,5 @@
+//! System tray icon, menu state, and menu event handling.
+
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -12,6 +14,7 @@ const COPY_TIMESTAMP_MENU_ID: &str = "copy_timestamp_enabled";
 const CLIPBOARD_HISTORY_MENU_ID: &str = "clipboard_history_enabled";
 const QUIT_MENU_ID: &str = "quit";
 
+/// Keeps tray UI handles alive and exposes menu items needed by the event pump.
 pub struct TrayState {
     pub icon: TrayIcon,
     pub menu: Menu,
@@ -19,6 +22,7 @@ pub struct TrayState {
     clipboard_history_item: CheckMenuItem,
 }
 
+/// Creates the tray icon and initializes menu check states from settings.
 pub fn init_tray_icon(settings: &AppSettings) -> TrayState {
     let tray_menu = Menu::new();
 
@@ -61,6 +65,7 @@ pub fn init_tray_icon(settings: &AppSettings) -> TrayState {
     }
 }
 
+/// Polls tray menu events from the Slint event loop and persists setting changes.
 pub fn start_tray_event_pump(
     tray_state: &TrayState,
     settings: Arc<Mutex<AppSettings>>,

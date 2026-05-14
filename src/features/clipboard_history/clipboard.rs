@@ -1,9 +1,12 @@
+//! Clipboard read/write helpers, including Windows file-list clipboard support.
+
 use std::path::PathBuf;
 
 use arboard::{Clipboard, ImageData};
 
 use crate::features::clipboard_history::history::ClipboardHistoryItem;
 
+/// Reads the current clipboard and converts supported formats into a history item.
 pub fn capture_clipboard_item() -> Option<ClipboardHistoryItem> {
     if let Some(paths) = platform::get_clipboard_files() {
         if !paths.is_empty() {
@@ -37,6 +40,7 @@ pub fn capture_clipboard_item() -> Option<ClipboardHistoryItem> {
     None
 }
 
+/// Writes a history item back to the clipboard so it can be pasted.
 pub fn put_clipboard_item(item: &ClipboardHistoryItem) -> Result<(), String> {
     match item {
         ClipboardHistoryItem::Text { text } => Clipboard::new()
@@ -63,6 +67,7 @@ mod platform {
     use super::*;
 
     #[cfg(target_os = "windows")]
+    /// Reads Windows CF_HDROP file paths from the clipboard.
     pub fn get_clipboard_files() -> Option<Vec<PathBuf>> {
         use std::os::windows::ffi::OsStringExt;
         use windows_sys::Win32::System::DataExchange::{
@@ -107,11 +112,13 @@ mod platform {
     }
 
     #[cfg(not(target_os = "windows"))]
+    /// File-list clipboard capture is currently implemented only for Windows.
     pub fn get_clipboard_files() -> Option<Vec<PathBuf>> {
         None
     }
 
     #[cfg(target_os = "windows")]
+    /// Writes Windows CF_HDROP file paths to the clipboard.
     pub fn set_clipboard_files(paths: &[PathBuf]) -> Result<(), String> {
         use std::mem::size_of;
         use std::os::windows::ffi::OsStrExt;
@@ -178,6 +185,7 @@ mod platform {
     }
 
     #[cfg(not(target_os = "windows"))]
+    /// Falls back to newline-separated file paths on platforms without CF_HDROP.
     pub fn set_clipboard_files(paths: &[PathBuf]) -> Result<(), String> {
         Clipboard::new()
             .map_err(|err| format!("open clipboard failed: {err}"))?

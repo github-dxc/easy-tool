@@ -1,0 +1,68 @@
+import { Button, TextEdit } from "std-widgets.slint";
+import "../assets/font/AlibabaPuHuiTi-3-55-Regular.ttf";
+
+export component FilePreviewWindow inherits Window {
+    width: 820px;
+    height: 620px;
+    title: root.file_name != "" ? root.file_name : "文件预览";
+    default-font-family: "Alibaba PuHuiTi 3.0";
+
+    in-out property <string> file_path: "";
+    in-out property <string> file_name: "";
+    in-out property <string> status_text: "";
+    in-out property <string> text_content: "";
+    in-out property <image> image_content;
+    in-out property <bool> is_image: false;
+    in-out property <bool> has_content: false;
+    in-out property <int> image_width: 0;
+    in-out property <int> image_height: 0;
+
+    callback close_preview();
+
+    Rectangle {
+        background: #F6F7F9;
+
+        VerticalLayout {
+            padding: 14px;
+            spacing: 10px;
+
+            Rectangle {
+                background: #FFFFFF;
+                border-color: #D9DDE3;
+                border-width: 1px;
+                border-radius: 6px;
+                clip: true;
+
+                if !root.has_content: Text {
+                    text: root.status_text;
+                    color: #6B7280;
+                    font-size: 14px;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+
+                if root.has_content && root.is_image: Rectangle {
+                    background: #ECEFF3;
+
+                    Image {
+                        width: root.image_width * 1px;
+                        height: root.image_height * 1px;
+                        x: (parent.width - self.width) / 2;
+                        y: (parent.height - self.height) / 2;
+                        source: root.image_content;
+                        image-fit: contain;
+                    }
+                }
+
+                if root.has_content && !root.is_image: TextEdit {
+                    width: parent.width;
+                    height: parent.height;
+                    read-only: true;
+                    wrap: word-wrap;
+                    font-size: 14px;
+                    text: root.text_content;
+                }
+            }
+        }
+    }
+}

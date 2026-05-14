@@ -1,7 +1,10 @@
+//! Parser and converter for timestamps and common date-time strings.
+
 use chrono::{DateTime, NaiveDateTime, TimeZone, Utc};
 use chrono_tz::Tz;
 use regex::Regex;
 
+/// Converts supported timestamp/date strings in either seconds or milliseconds.
 pub fn trans_string_timestamp(
     input: &str,
     unit: bool,

@@ -1,4 +1,7 @@
+//! Cross-platform message dialog helper.
+
 #[cfg(target_os = "windows")]
+/// Shows a native Windows information message box.
 pub fn show_message_box(title: &str, message: &str) {
     use std::ffi::OsStr;
     use std::os::windows::ffi::OsStrExt;
@@ -24,6 +27,7 @@ pub fn show_message_box(title: &str, message: &str) {
 }
 
 #[cfg(not(target_os = "windows"))]
+/// Falls back to stderr when a native dialog is not implemented.
 pub fn show_message_box(title: &str, message: &str) {
     eprintln!("{title}: {message}");
 }

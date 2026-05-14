@@ -1,3 +1,5 @@
+//! Clipboard watcher that captures changed content into clipboard history.
+
 use std::io;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -12,6 +14,7 @@ use crate::features::clipboard_history::history::ClipboardHistory;
 use crate::features::clipboard_history::window::refresh_clipboard_history_window;
 use crate::settings::AppSettings;
 
+/// Spawns the OS clipboard listener on a background thread.
 pub fn start_clipboard_history_listener(
     history: Arc<Mutex<ClipboardHistory>>,
     settings: Arc<Mutex<AppSettings>>,
@@ -43,6 +46,7 @@ pub fn start_clipboard_history_listener(
     Ok(())
 }
 
+// Bridges clipboard-master callbacks to the shared history model and UI refresh.
 struct HistoryClipboardHandler {
     history: Arc<Mutex<ClipboardHistory>>,
     settings: Arc<Mutex<AppSettings>>,

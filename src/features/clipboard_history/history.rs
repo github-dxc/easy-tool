@@ -1,3 +1,5 @@
+//! In-memory clipboard history model and display helpers.
+
 use std::collections::VecDeque;
 use std::path::PathBuf;
 
@@ -5,6 +7,7 @@ use arboard::ImageData;
 
 const MAX_HISTORY_ITEMS: usize = 20;
 
+/// One clipboard entry captured by the history listener.
 #[derive(Debug, Clone)]
 pub enum ClipboardHistoryItem {
     Text {
@@ -20,6 +23,7 @@ pub enum ClipboardHistoryItem {
     },
 }
 
+/// Fixed-size, newest-first clipboard history store.
 #[derive(Debug, Default)]
 pub struct ClipboardHistory {
     items: VecDeque<ClipboardHistoryItem>,
@@ -55,6 +59,7 @@ impl ClipboardHistory {
 }
 
 impl ClipboardHistoryItem {
+    /// Short text shown in the history list.
     pub fn title(&self) -> String {
         match self {
             Self::Text { text } => summarize_text(text, 20),
@@ -69,6 +74,7 @@ impl ClipboardHistoryItem {
         }
     }
 
+    /// Longer text shown in the detail panel.
     pub fn detail(&self) -> String {
         match self {
             Self::Text { text } => summarize_text(text, 180),
@@ -90,6 +96,7 @@ impl ClipboardHistoryItem {
         }
     }
 
+    /// Full textual representation used for copy/preview display.
     pub fn full_text(&self) -> String {
         match self {
             Self::Text { text } => text.clone(),
@@ -97,6 +104,7 @@ impl ClipboardHistoryItem {
         }
     }
 
+    /// Stable item kind string consumed by the Slint UI.
     pub fn kind(&self) -> &'static str {
         match self {
             Self::Text { .. } => "text",
@@ -105,6 +113,7 @@ impl ClipboardHistoryItem {
         }
     }
 
+    /// Converts stored image bytes back into clipboard/image preview data.
     pub fn image_data(&self) -> Option<ImageData<'static>> {
         match self {
             Self::Image {

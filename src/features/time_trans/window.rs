@@ -1,3 +1,5 @@
+//! Slint window setup and callbacks for the timestamp converter.
+
 use arboard::Clipboard;
 use i_slint_backend_winit::WinitWindowAccessor;
 use slint::ComponentHandle;
@@ -8,6 +10,7 @@ use crate::config::{TIMEZONE_LABELS, TIMEZONES};
 use crate::features::time_trans::converter::trans_string_timestamp;
 use crate::platform::window::hide_taskbar_icon;
 
+/// Builds the timestamp converter window and binds all UI callbacks.
 pub fn init_time_trans_window() -> TimeTrans {
     let time_window = TimeTrans::new().unwrap();
 

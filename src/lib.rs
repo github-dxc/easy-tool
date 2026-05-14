@@ -1,3 +1,5 @@
+//! Library entry point that wires generated Slint UI modules with app code.
+
 pub mod app;
 pub mod assets;
 pub mod config;

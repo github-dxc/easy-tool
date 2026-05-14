@@ -1,8 +1,11 @@
+//! Persistent application settings stored as a TOML file in the user config dir.
+
 use std::fs;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+/// Top-level user preferences used by tray toggles and runtime features.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppSettings {
     #[serde(default = "default_enabled_copy_timestamp")]
@@ -11,11 +14,13 @@ pub struct AppSettings {
     pub clipboard_history: ClipboardHistorySettings,
 }
 
+/// Controls whether copied timestamps show the floating conversion window.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CopyTimestampSettings {
     pub enabled: bool,
 }
 
+/// Controls whether clipboard changes are captured into history.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClipboardHistorySettings {
     pub enabled: bool,
@@ -38,6 +43,7 @@ fn default_enabled_clipboard_history() -> ClipboardHistorySettings {
     ClipboardHistorySettings { enabled: true }
 }
 
+/// Loads and saves settings from the configured TOML file.
 #[derive(Debug, Clone)]
 pub struct SettingsStore {
     path: PathBuf,

@@ -1,3 +1,5 @@
+//! Window helpers that bridge Slint windows with winit and Win32 APIs.
+
 use i_slint_backend_winit::WinitWindowAccessor;
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use slint::ComponentHandle;
@@ -5,12 +7,14 @@ use winit::dpi::PhysicalPosition;
 
 use crate::TimeTrans;
 
+/// Moves the timestamp floating window to an absolute screen position.
 pub fn set_position(time_window: &TimeTrans, x: f64, y: f64) {
     time_window.window().with_winit_window(|winit_window| {
         winit_window.set_outer_position(PhysicalPosition::new(x, y));
     });
 }
 
+/// Returns the current monitor size for the timestamp window.
 pub fn display_size(time_window: &TimeTrans) -> Option<(f64, f64)> {
     let mut width = 0f64;
     let mut height = 0f64;
@@ -25,6 +29,7 @@ pub fn display_size(time_window: &TimeTrans) -> Option<(f64, f64)> {
     (width > 0f64 && height > 0f64).then_some((width, height))
 }
 
+/// Marks the floating window as a tool window so it stays out of the taskbar.
 pub fn hide_taskbar_icon(time_window: &TimeTrans) {
     time_window.window().with_winit_window(|winit_window| {
         if let Ok(handle) = winit_window.window_handle()
@@ -55,22 +60,26 @@ pub fn hide_taskbar_icon(time_window: &TimeTrans) {
 }
 
 #[cfg(target_os = "windows")]
+/// Returns the foreground Win32 window handle for later paste activation.
 pub fn foreground_window_handle() -> Option<isize> {
     let hwnd = unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow() };
     (hwnd != 0).then_some(hwnd)
 }
 
 #[cfg(not(target_os = "windows"))]
+/// Non-Windows platforms currently do not expose a foreground-window handle.
 pub fn foreground_window_handle() -> Option<isize> {
     None
 }
 
 #[cfg(target_os = "windows")]
+/// Brings a saved Win32 window handle back to the foreground.
 pub fn activate_window(hwnd: isize) -> bool {
     unsafe { windows_sys::Win32::UI::WindowsAndMessaging::SetForegroundWindow(hwnd) != 0 }
 }
 
 #[cfg(not(target_os = "windows"))]
+/// Non-Windows platforms currently do not support foreground activation here.
 pub fn activate_window(_hwnd: isize) -> bool {
     false
 }

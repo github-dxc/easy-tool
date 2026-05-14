@@ -1,3 +1,7 @@
+//! Slint window setup and presentation logic for clipboard history.
+
+use std::path::Path;
+use std::process::Command;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -8,9 +12,11 @@ use slint::{ComponentHandle, Image, ModelRc, Rgba8Pixel, SharedPixelBuffer, VecM
 
 use crate::features::clipboard_history::clipboard::put_clipboard_item;
 use crate::features::clipboard_history::history::{ClipboardHistory, ClipboardHistoryItem};
+use crate::features::file_preview::window::is_supported_preview_file;
 use crate::platform::window::activate_window;
 use crate::{ClipboardHistoryRow, ClipboardHistoryWindow};
 
+/// Builds the clipboard-history window and binds actions for paste/delete/open.
 pub fn init_clipboard_history_window(
     history: Arc<Mutex<ClipboardHistory>>,
     paste_target: Arc<Mutex<Option<isize>>>,
@@ -83,9 +89,43 @@ pub fn init_clipboard_history_window(
         }
     });
 
+    let history_for_open = Arc::clone(&history);
+    window.on_open_entry(move |index| {
+        if index < 0 {
+            return;
+        }
+
+        let item = history_for_open.lock().unwrap().get(index as usize);
+        let Some(ClipboardHistoryItem::Files { paths }) = item else {
+            return;
+        };
+        let Some(path) = paths.first().filter(|_| paths.len() == 1).cloned() else {
+            return;
+        };
+        if !is_supported_preview_file(&path) {
+            return;
+        }
+
+        if let Err(err) = open_standalone_file_preview(&path) {
+            log::error!("open standalone file preview failed: {err}");
+        }
+    });
+
     window
 }
 
+fn open_standalone_file_preview(path: &Path) -> Result<(), String> {
+    let exe_path =
+        std::env::current_exe().map_err(|err| format!("get current exe failed: {err}"))?;
+    Command::new(exe_path)
+        .arg(path)
+        .spawn()
+        .map_err(|err| format!("spawn file preview failed: {err}"))?;
+
+    Ok(())
+}
+
+/// Refreshes history rows before showing the window.
 pub fn show_clipboard_history_window(
     window: &ClipboardHistoryWindow,
     history: &Arc<Mutex<ClipboardHistory>>,
@@ -94,6 +134,7 @@ pub fn show_clipboard_history_window(
     let _ = window.show();
 }
 
+/// Rebuilds the Slint row model from the shared history store.
 pub fn refresh_clipboard_history_window(
     window: &ClipboardHistoryWindow,
     history: &Arc<Mutex<ClipboardHistory>>,

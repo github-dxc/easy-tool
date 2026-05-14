@@ -2,6 +2,7 @@
 
 use easy_tool::*;
 
+// Keep the binary entry point minimal; all startup work lives in `app::run`.
 fn main() {
     run();
 }

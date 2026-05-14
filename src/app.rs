@@ -1,3 +1,5 @@
+//! Application bootstrap and cross-feature event wiring.
+
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -13,6 +15,8 @@ use crate::features::clipboard_history::history::ClipboardHistory;
 use crate::features::clipboard_history::window::{
     init_clipboard_history_window, show_clipboard_history_window,
 };
+use crate::features::file_preview::registry::register_file_context_menu;
+use crate::features::file_preview::window::{init_file_preview_window, show_file_preview_window};
 use crate::features::time_trans::window::init_time_trans_window;
 use crate::infrastructure::clipboard_listener::start_clipboard_history_listener;
 use crate::infrastructure::global_input::start_global_input_listener;
@@ -22,7 +26,16 @@ use crate::platform::dialog::show_message_box;
 use crate::platform::window::{display_size, foreground_window_handle, set_position};
 use crate::settings::SettingsStore;
 
+/// Starts the app, enforces a single instance, initializes features, and enters the Slint loop.
 pub fn run() {
+    if let Some(path) = std::env::args_os().nth(1) {
+        init_logging().expect("failed to initialize logging");
+        let file_preview_window = init_file_preview_window(true);
+        show_file_preview_window(&file_preview_window, path.into());
+        slint::run_event_loop_until_quit().unwrap();
+        return;
+    }
+
     let instance =
         SingleInstance::new(APP_INSTANCE_ID).expect("failed to create single instance lock");
     if !instance.is_single() {
@@ -31,6 +44,9 @@ pub fn run() {
     }
 
     init_logging().expect("failed to initialize logging");
+    if let Err(err) = register_file_context_menu() {
+        log::error!("register file context menu failed: {err}");
+    }
 
     let settings_store = SettingsStore::new();
     let settings = Arc::new(Mutex::new(
@@ -150,6 +166,7 @@ fn next_window_position(window: &crate::TimeTrans, cur_x: f64, cur_y: f64) -> (f
     (move_x, move_y)
 }
 
+// Tracks modifier state for the global Ctrl+Shift+C clipboard-history shortcut.
 #[derive(Default)]
 struct ShortcutState {
     ctrl: bool,
