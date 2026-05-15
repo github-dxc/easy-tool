@@ -12,6 +12,8 @@ pub struct AppSettings {
     pub copy_timestamp: CopyTimestampSettings,
     #[serde(default = "default_enabled_clipboard_history")]
     pub clipboard_history: ClipboardHistorySettings,
+    #[serde(default)]
+    pub text_translation: TextTranslationSettings,
 }
 
 /// Controls whether copied timestamps show the floating conversion window.
@@ -26,11 +28,27 @@ pub struct ClipboardHistorySettings {
     pub enabled: bool,
 }
 
+/// Controls copy-triggered text translation and model loading.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TextTranslationSettings {
+    pub enabled: bool,
+    #[serde(default)]
+    pub direction: TranslationDirection,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TranslationDirection {
+    ZhToEn,
+    EnToZh,
+}
+
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
             copy_timestamp: CopyTimestampSettings { enabled: true },
             clipboard_history: ClipboardHistorySettings { enabled: true },
+            text_translation: TextTranslationSettings::default(),
         }
     }
 }
@@ -41,6 +59,30 @@ fn default_enabled_copy_timestamp() -> CopyTimestampSettings {
 
 fn default_enabled_clipboard_history() -> ClipboardHistorySettings {
     ClipboardHistorySettings { enabled: true }
+}
+
+impl Default for TextTranslationSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            direction: TranslationDirection::ZhToEn,
+        }
+    }
+}
+
+impl Default for TranslationDirection {
+    fn default() -> Self {
+        Self::ZhToEn
+    }
+}
+
+impl TextTranslationSettings {
+    pub fn model_path(&self) -> PathBuf {
+        match self.direction {
+            TranslationDirection::ZhToEn => zh_to_en_translation_model_path(),
+            TranslationDirection::EnToZh => en_to_zh_translation_model_path(),
+        }
+    }
 }
 
 /// Loads and saves settings from the configured TOML file.
@@ -69,7 +111,10 @@ impl SettingsStore {
 
         let content =
             fs::read_to_string(&self.path).map_err(|err| format!("read settings failed: {err}"))?;
-        toml::from_str(&content).map_err(|err| format!("parse settings failed: {err}"))
+        let settings: AppSettings =
+            toml::from_str(&content).map_err(|err| format!("parse settings failed: {err}"))?;
+
+        Ok(settings)
     }
 
     pub fn save(&self, settings: &AppSettings) -> Result<(), String> {
@@ -89,4 +134,18 @@ fn default_config_path() -> PathBuf {
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
         .join("easy-tool")
         .join("config.toml")
+}
+
+fn zh_to_en_translation_model_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("resource")
+        .join("Xenova")
+        .join("opus-mt-zh-en")
+}
+
+fn en_to_zh_translation_model_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("resource")
+        .join("Xenova")
+        .join("opus-mt-en-zh")
 }

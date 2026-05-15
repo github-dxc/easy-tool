@@ -59,6 +59,22 @@ pub fn hide_taskbar_icon(time_window: &TimeTrans) {
     });
 }
 
+/// Brings an existing Slint window to the foreground when supported by the platform.
+pub fn activate_slint_window(window: &impl ComponentHandle) {
+    window.window().with_winit_window(|winit_window| {
+        winit_window.set_minimized(false);
+        winit_window.focus_window();
+
+        #[cfg(target_os = "windows")]
+        if let Ok(handle) = winit_window.window_handle()
+            && let RawWindowHandle::Win32(win32_handle) = handle.as_raw()
+        {
+            let hwnd = win32_handle.hwnd.get() as isize;
+            let _ = activate_window(hwnd);
+        }
+    });
+}
+
 #[cfg(target_os = "windows")]
 /// Returns the foreground Win32 window handle for later paste activation.
 pub fn foreground_window_handle() -> Option<isize> {

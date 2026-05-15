@@ -1,6 +1,6 @@
 //! Application bootstrap and cross-feature event wiring.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -17,13 +17,18 @@ use crate::features::clipboard_history::window::{
 };
 use crate::features::file_preview::registry::register_file_context_menu;
 use crate::features::file_preview::window::{init_file_preview_window, show_file_preview_window};
+use crate::features::text_translation::translator::TranslationService;
+use crate::features::text_translation::window::{
+    init_text_translation_window, show_translation_partial, show_translation_pending,
+    show_translation_result,
+};
 use crate::features::time_trans::window::init_time_trans_window;
 use crate::infrastructure::clipboard_listener::start_clipboard_history_listener;
 use crate::infrastructure::global_input::start_global_input_listener;
 use crate::infrastructure::logging::init_logging;
 use crate::infrastructure::tray::{init_tray_icon, start_tray_event_pump};
 use crate::platform::dialog::show_message_box;
-use crate::platform::window::{display_size, foreground_window_handle, set_position};
+use crate::platform::window::{display_size, set_position};
 use crate::settings::SettingsStore;
 
 /// Starts the app, enforces a single instance, initializes features, and enters the Slint loop.
@@ -58,12 +63,17 @@ pub fn run() {
 
     let time_trans_window = init_time_trans_window();
     let weak_window = time_trans_window.as_weak();
+    let translation_cancel_generation = Arc::new(AtomicU64::new(0));
+    let text_translation_window =
+        init_text_translation_window(Arc::clone(&translation_cancel_generation));
+    let weak_translation_window = text_translation_window.as_weak();
     let clipboard_history = Arc::new(Mutex::new(ClipboardHistory::default()));
-    let paste_target_window = Arc::new(Mutex::new(None));
     let suppress_shortcuts = Arc::new(AtomicBool::new(false));
+    let translation_service = Arc::new(TranslationService::new(
+        &settings.lock().unwrap().text_translation,
+    ));
     let clipboard_history_window = init_clipboard_history_window(
         Arc::clone(&clipboard_history),
-        Arc::clone(&paste_target_window),
         Arc::clone(&suppress_shortcuts),
     );
     let weak_history_window = clipboard_history_window.as_weak();
@@ -84,8 +94,10 @@ pub fn run() {
         let settings = Arc::clone(&settings);
         let clipboard_history = Arc::clone(&clipboard_history);
         let shortcut_state = Arc::clone(&shortcut_state);
-        let paste_target_window = Arc::clone(&paste_target_window);
         let suppress_shortcuts = Arc::clone(&suppress_shortcuts);
+        let translation_service = Arc::clone(&translation_service);
+        let translation_cancel_generation = Arc::clone(&translation_cancel_generation);
+        let weak_translation_window = weak_translation_window.clone();
 
         move |event| {
             if let EventType::MouseMove { x, y } = event.event_type {
@@ -97,7 +109,6 @@ pub fn run() {
             if should_show_history && !suppress_shortcuts.load(Ordering::SeqCst) {
                 shortcut_state.lock().unwrap().clear();
                 if settings.lock().unwrap().clipboard_history.enabled {
-                    *paste_target_window.lock().unwrap() = foreground_window_handle();
                     let history = Arc::clone(&clipboard_history);
                     weak_history_window
                         .upgrade_in_event_loop(move |window| {
@@ -109,6 +120,78 @@ pub fn run() {
 
             if event.name.as_deref() == Some("\u{3}") {
                 let settings_snapshot = settings.lock().unwrap().clone();
+                if settings_snapshot.text_translation.enabled {
+                    let translation_service = Arc::clone(&translation_service);
+                    let translation_cancel_generation = Arc::clone(&translation_cancel_generation);
+                    let weak_translation_window = weak_translation_window.clone();
+                    std::thread::spawn(move || {
+                        let translation_run_id =
+                            translation_cancel_generation.fetch_add(1, Ordering::SeqCst) + 1;
+                        std::thread::sleep(Duration::from_millis(200));
+
+                        let source_text = Clipboard::new()
+                            .ok()
+                            .and_then(|mut clipboard| clipboard.get_text().ok())
+                            .map(|text| text.trim().to_string())
+                            .filter(|text| !text.is_empty());
+                        let Some(source_text) = source_text else {
+                            return;
+                        };
+
+                        let pending_source = source_text.clone();
+                        if let Err(err) =
+                            weak_translation_window.upgrade_in_event_loop(move |window| {
+                                show_translation_pending(&window, &pending_source);
+                            })
+                        {
+                            log::error!("show translation window failed: {err}");
+                            return;
+                        }
+
+                        let partial_window = weak_translation_window.clone();
+                        let partial_cancel_generation = Arc::clone(&translation_cancel_generation);
+                        let translated_text = translation_service
+                            .translate_streaming_cancellable(
+                                &source_text,
+                                move |partial_text| {
+                                    if partial_cancel_generation.load(Ordering::SeqCst)
+                                        != translation_run_id
+                                    {
+                                        return;
+                                    }
+
+                                    let partial_text = partial_text.to_string();
+                                    if let Err(err) =
+                                        partial_window.upgrade_in_event_loop(move |window| {
+                                            show_translation_partial(&window, &partial_text);
+                                        })
+                                    {
+                                        log::error!("show partial translation failed: {err}");
+                                    }
+                                },
+                                || {
+                                    translation_cancel_generation.load(Ordering::SeqCst)
+                                        != translation_run_id
+                                },
+                            )
+                            .unwrap_or_else(|err| format!("翻译失败: {err}"));
+
+                        if translation_cancel_generation.load(Ordering::SeqCst)
+                            != translation_run_id
+                        {
+                            return;
+                        }
+
+                        if let Err(err) =
+                            weak_translation_window.upgrade_in_event_loop(move |window| {
+                                show_translation_result(&window, &translated_text);
+                            })
+                        {
+                            log::error!("show translation result failed: {err}");
+                        }
+                    });
+                }
+
                 if !settings_snapshot.copy_timestamp.enabled {
                     return Ok(());
                 }
@@ -141,7 +224,12 @@ pub fn run() {
     })
     .expect("failed to start global input listener");
 
-    let _tray_timer = start_tray_event_pump(&tray_state, Arc::clone(&settings), settings_store);
+    let _tray_timer = start_tray_event_pump(
+        &tray_state,
+        Arc::clone(&settings),
+        settings_store,
+        translation_service,
+    );
     slint::run_event_loop_until_quit().unwrap();
 }
 

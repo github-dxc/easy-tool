@@ -1,11 +1,11 @@
 //! Slint window setup and presentation logic for clipboard history.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use rdev::{EventType, Key, simulate};
 use slint::{ComponentHandle, Image, ModelRc, Rgba8Pixel, SharedPixelBuffer, VecModel};
@@ -13,13 +13,12 @@ use slint::{ComponentHandle, Image, ModelRc, Rgba8Pixel, SharedPixelBuffer, VecM
 use crate::features::clipboard_history::clipboard::put_clipboard_item;
 use crate::features::clipboard_history::history::{ClipboardHistory, ClipboardHistoryItem};
 use crate::features::file_preview::window::is_supported_preview_file;
-use crate::platform::window::activate_window;
+use crate::platform::window::activate_slint_window;
 use crate::{ClipboardHistoryRow, ClipboardHistoryWindow};
 
 /// Builds the clipboard-history window and binds actions for paste/delete/open.
 pub fn init_clipboard_history_window(
     history: Arc<Mutex<ClipboardHistory>>,
-    paste_target: Arc<Mutex<Option<isize>>>,
     suppress_shortcuts: Arc<AtomicBool>,
 ) -> ClipboardHistoryWindow {
     let window = ClipboardHistoryWindow::new().unwrap();
@@ -46,15 +45,10 @@ pub fn init_clipboard_history_window(
             let _ = ui.hide();
         }
 
-        let target = *paste_target.lock().unwrap();
         let suppress_shortcuts = Arc::clone(&suppress_shortcuts);
         std::thread::spawn(move || {
             suppress_shortcuts.store(true, Ordering::SeqCst);
             std::thread::sleep(Duration::from_millis(120));
-            if let Some(hwnd) = target {
-                activate_window(hwnd);
-                std::thread::sleep(Duration::from_millis(120));
-            }
             let _ = simulate(&EventType::KeyPress(Key::ControlLeft));
             let _ = simulate(&EventType::KeyPress(Key::KeyV));
             let _ = simulate(&EventType::KeyRelease(Key::KeyV));
@@ -96,22 +90,69 @@ pub fn init_clipboard_history_window(
         }
 
         let item = history_for_open.lock().unwrap().get(index as usize);
-        let Some(ClipboardHistoryItem::Files { paths }) = item else {
+        let Some(item) = item else {
             return;
         };
-        let Some(path) = paths.first().filter(|_| paths.len() == 1).cloned() else {
-            return;
-        };
-        if !is_supported_preview_file(&path) {
-            return;
-        }
 
-        if let Err(err) = open_standalone_file_preview(&path) {
+        let preview_path = match preview_path_from_history_item(&item) {
+            Ok(Some(path)) => path,
+            Ok(None) => return,
+            Err(err) => {
+                log::error!("prepare history preview failed: {err}");
+                return;
+            }
+        };
+
+        if let Err(err) = open_standalone_file_preview(&preview_path) {
             log::error!("open standalone file preview failed: {err}");
         }
     });
 
     window
+}
+
+fn preview_path_from_history_item(item: &ClipboardHistoryItem) -> Result<Option<PathBuf>, String> {
+    match item {
+        ClipboardHistoryItem::Files { paths } => {
+            let Some(path) = paths.first().filter(|_| paths.len() == 1).cloned() else {
+                return Ok(None);
+            };
+
+            Ok(is_supported_preview_file(&path).then_some(path))
+        }
+        ClipboardHistoryItem::Image { .. } => save_history_image_preview(item).map(Some),
+        ClipboardHistoryItem::Text { .. } => Ok(None),
+    }
+}
+
+fn save_history_image_preview(item: &ClipboardHistoryItem) -> Result<PathBuf, String> {
+    let image = item
+        .image_data()
+        .ok_or_else(|| "history item is not an image".to_string())?;
+    let rgba = image::RgbaImage::from_raw(
+        image.width as u32,
+        image.height as u32,
+        image.bytes.into_owned(),
+    )
+    .ok_or_else(|| "invalid clipboard image bytes".to_string())?;
+
+    let dir = std::env::temp_dir()
+        .join("easy-tool")
+        .join("clipboard-preview");
+    std::fs::create_dir_all(&dir).map_err(|err| format!("create preview dir failed: {err}"))?;
+
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|err| format!("read system time failed: {err}"))?
+        .as_millis();
+    let path = dir.join(format!(
+        "clipboard-image-{}-{timestamp}.png",
+        std::process::id()
+    ));
+
+    rgba.save(&path)
+        .map_err(|err| format!("save clipboard image preview failed: {err}"))?;
+    Ok(path)
 }
 
 fn open_standalone_file_preview(path: &Path) -> Result<(), String> {
@@ -130,8 +171,14 @@ pub fn show_clipboard_history_window(
     window: &ClipboardHistoryWindow,
     history: &Arc<Mutex<ClipboardHistory>>,
 ) {
+    if window.window().is_visible() {
+        activate_slint_window(window);
+        return;
+    }
+
     refresh_clipboard_history_window(window, history);
     let _ = window.show();
+    activate_slint_window(window);
 }
 
 /// Rebuilds the Slint row model from the shared history store.
