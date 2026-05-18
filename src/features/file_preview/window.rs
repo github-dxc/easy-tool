@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use slint::{CloseRequestResponse, ComponentHandle, Image, Rgba8Pixel, SharedPixelBuffer};
 
 use crate::FilePreviewWindow;
+use crate::platform::dialog::open_file_dialog;
 
 const MAX_IMAGE_WIDTH: u32 = 760;
 const MAX_IMAGE_HEIGHT: u32 = 500;
@@ -19,6 +20,17 @@ pub fn init_file_preview_window(quit_on_close: bool) -> FilePreviewWindow {
     });
 
     let weak = window.as_weak();
+    window.on_open_file(move || {
+        let Some(path) = open_file_dialog("Open file") else {
+            return;
+        };
+
+        if let Some(ui) = weak.upgrade() {
+            show_file_preview_window(&ui, path);
+        }
+    });
+
+    let weak = window.as_weak();
     window.window().on_close_requested(move || {
         close_preview_window(&weak, quit_on_close);
         CloseRequestResponse::HideWindow
@@ -30,6 +42,20 @@ pub fn init_file_preview_window(quit_on_close: bool) -> FilePreviewWindow {
 /// Loads a file and displays the preview window.
 pub fn show_file_preview_window(window: &FilePreviewWindow, path: PathBuf) {
     load_file_preview(window, &path);
+    let _ = window.show();
+}
+
+/// Opens the preview window in an empty state for launchers such as the home page.
+pub fn show_empty_file_preview_window(window: &FilePreviewWindow) {
+    window.set_file_path("".into());
+    window.set_file_name("文件预览".into());
+    window.set_status_text("暂无文件内容".into());
+    window.set_text_content("".into());
+    window.set_image_content(Image::default());
+    window.set_is_image(false);
+    window.set_has_content(false);
+    window.set_image_width(0);
+    window.set_image_height(0);
     let _ = window.show();
 }
 

@@ -1,0 +1,122 @@
+import "../assets/font/AlibabaPuHuiTi-3-55-Regular.ttf";
+
+component ToolTile inherits Rectangle {
+    in property <image> icon;
+    in property <string> name: "";
+    callback clicked;
+
+    width: 78px;
+    height: 116px;
+    border-radius: 8px;
+    border-width: 1px;
+    border-color: touch.has-hover ? #A8C7FA : #DCE3EA;
+    background: touch.pressed ? #E8F0FE : touch.has-hover ? #F3F7FC : #FFFFFF;
+
+    touch := TouchArea {
+        clicked => {
+            root.clicked();
+        }
+    }
+
+    Image {
+        width: 64px;
+        height: 64px;
+        x: (parent.width - self.width) / 2;
+        y: 14px;
+        source: root.icon;
+        image-fit: contain;
+    }
+
+    Text {
+        width: parent.width;
+        height: 28px;
+        x: 0px;
+        y: 82px;
+        text: root.name;
+        color: #1F2A33;
+        font-size: 13px;
+        font-weight: 700;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}
+
+export component HomeWindow inherits Window {
+    width: 400px;
+    height: 300px;
+    title: "easy-tool";
+    default-font-family: "Alibaba PuHuiTi 3.0";
+
+    in property <image> tool_icon;
+
+    callback open_time_trans();
+    callback open_clipboard_history();
+    callback open_text_translation();
+    callback open_file_preview();
+
+    Rectangle {
+        background: #EEF2F6;
+
+        VerticalLayout {
+            padding: 24px;
+            spacing: 18px;
+
+            Text {
+                text: "easy-tool";
+                color: #16202A;
+                font-size: 30px;
+                font-weight: 800;
+                horizontal-alignment: center;
+            }
+
+            Flickable {
+                viewport-height: tools.height;
+
+                tools := Rectangle {
+                    width: parent.width;
+                    height: 116px;
+                    background: transparent;
+
+                    HorizontalLayout {
+                        width: parent.width;
+                        height: parent.height;
+                        spacing: 12px;
+                        alignment: center;
+
+                        ToolTile {
+                            icon: root.tool_icon;
+                            name: "时间戳转换";
+                            clicked => {
+                                root.open_time_trans();
+                            }
+                        }
+
+                        ToolTile {
+                            icon: root.tool_icon;
+                            name: "复制历史";
+                            clicked => {
+                                root.open_clipboard_history();
+                            }
+                        }
+
+                        ToolTile {
+                            icon: root.tool_icon;
+                            name: "文本翻译";
+                            clicked => {
+                                root.open_text_translation();
+                            }
+                        }
+
+                        ToolTile {
+                            icon: root.tool_icon;
+                            name: "文件预览";
+                            clicked => {
+                                root.open_file_preview();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

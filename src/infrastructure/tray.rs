@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use log::info;
 use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu};
-use tray_icon::{TrayIcon, TrayIconBuilder};
+use tray_icon::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 
 use crate::assets::load_tray_icon;
 use crate::features::text_translation::translator::TranslationService;
@@ -103,6 +103,7 @@ pub fn start_tray_event_pump(
     settings: Arc<Mutex<AppSettings>>,
     settings_store: SettingsStore,
     translation_service: Arc<TranslationService>,
+    show_home_window: impl Fn() + 'static,
 ) -> slint::Timer {
     let tray_timer = slint::Timer::default();
     let copy_timestamp_item = tray_state.copy_timestamp_item.clone();
@@ -114,6 +115,19 @@ pub fn start_tray_event_pump(
         slint::TimerMode::Repeated,
         Duration::from_millis(16),
         move || {
+            while let Ok(event) = TrayIconEvent::receiver().try_recv() {
+                info!("tray icon event: {event:?}");
+
+                if let TrayIconEvent::Click {
+                    button: MouseButton::Left,
+                    button_state: MouseButtonState::Up,
+                    ..
+                } = event
+                {
+                    show_home_window();
+                }
+            }
+
             while let Ok(event) = MenuEvent::receiver().try_recv() {
                 info!("menu event: {event:?}");
 

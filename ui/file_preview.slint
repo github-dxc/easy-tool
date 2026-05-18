@@ -18,6 +18,7 @@ export component FilePreviewWindow inherits Window {
     in-out property <int> image_height: 0;
 
     callback close_preview();
+    callback open_file();
 
     Rectangle {
         background: #F6F7F9;
@@ -33,12 +34,25 @@ export component FilePreviewWindow inherits Window {
                 border-radius: 6px;
                 clip: true;
 
-                if !root.has_content: Text {
-                    text: root.status_text;
-                    color: #6B7280;
-                    font-size: 14px;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
+                if !root.has_content: VerticalLayout {
+                    alignment: center;
+                    spacing: 12px;
+
+                    Button {
+                        width: 96px;
+                        height: 32px;
+                        text: "Open";
+                        clicked => {
+                            root.open_file();
+                        }
+                    }
+
+                    Text {
+                        text: root.status_text;
+                        color: #6B7280;
+                        font-size: 14px;
+                        horizontal-alignment: center;
+                    }
                 }
 
                 if root.has_content && root.is_image: Rectangle {

@@ -17,6 +17,7 @@ use crate::features::clipboard_history::window::{
 };
 use crate::features::file_preview::registry::register_file_context_menu;
 use crate::features::file_preview::window::{init_file_preview_window, show_file_preview_window};
+use crate::features::home::window::{init_home_window, show_home_window};
 use crate::features::text_translation::translator::TranslationService;
 use crate::features::text_translation::window::{
     init_text_translation_window, show_translation_partial, show_translation_pending,
@@ -75,6 +76,15 @@ pub fn run() {
     let clipboard_history_window = init_clipboard_history_window(
         Arc::clone(&clipboard_history),
         Arc::clone(&suppress_shortcuts),
+    );
+    let file_preview_window = init_file_preview_window(false);
+    let home_window = init_home_window(
+        &time_trans_window,
+        &clipboard_history_window,
+        Arc::clone(&clipboard_history),
+        &text_translation_window,
+        Arc::clone(&translation_cancel_generation),
+        &file_preview_window,
     );
     let weak_history_window = clipboard_history_window.as_weak();
     let tray_state = init_tray_icon(&settings.lock().unwrap());
@@ -229,6 +239,14 @@ pub fn run() {
         Arc::clone(&settings),
         settings_store,
         translation_service,
+        {
+            let weak_home_window = home_window.as_weak();
+            move || {
+                if let Some(window) = weak_home_window.upgrade() {
+                    show_home_window(&window);
+                }
+            }
+        },
     );
     slint::run_event_loop_until_quit().unwrap();
 }

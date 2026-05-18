@@ -23,7 +23,7 @@ i-slint-backend-winit = "1.15.1"
 # 用于获取原始窗口句柄
 raw-window-handle = "0.6"
 # 用于调用 Windows 底层 API
-windows-sys = { version = "0.52", features = ["Win32_Foundation", "Win32_System_DataExchange", "Win32_System_Memory", "Win32_System_Ole", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+windows-sys = { version = "0.52", features = ["Win32_Foundation", "Win32_System_DataExchange", "Win32_System_Memory", "Win32_System_Ole", "Win32_UI_Controls_Dialogs", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 single-instance = "0.3"
 dirs = "6.0.0"
 serde = { version = "1.0.228", features = ["derive"] }
