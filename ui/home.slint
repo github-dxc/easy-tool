@@ -41,18 +41,42 @@ component ToolTile inherits Rectangle {
     }
 }
 
+component SettingsButton inherits Rectangle {
+    callback clicked;
+
+    width: 34px;
+    height: 34px;
+    background: transparent;
+
+    touch := TouchArea {
+        clicked => {
+            root.clicked();
+        }
+    }
+
+    Text {
+        width: parent.width;
+        height: parent.height;
+        text: "⚙";
+        color: touch.pressed ? #2F3A45 : touch.has-hover ? #42515F : #506071;
+        font-size: 18px;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        opacity: touch.pressed ? 0.65 : 1.0;
+    }
+}
+
 export component HomeWindow inherits Window {
     width: 400px;
     height: 300px;
     title: "easy-tool";
     default-font-family: "Alibaba PuHuiTi 3.0";
 
-    in property <image> tool_icon;
-
     callback open_time_trans();
     callback open_clipboard_history();
     callback open_text_translation();
     callback open_file_preview();
+    callback open_settings();
 
     Rectangle {
         background: #EEF2F6;
@@ -84,7 +108,7 @@ export component HomeWindow inherits Window {
                         alignment: center;
 
                         ToolTile {
-                            icon: root.tool_icon;
+                            icon: @image-url("../assets/icons/timestamp.png");
                             name: "时间戳转换";
                             clicked => {
                                 root.open_time_trans();
@@ -92,7 +116,7 @@ export component HomeWindow inherits Window {
                         }
 
                         ToolTile {
-                            icon: root.tool_icon;
+                            icon: @image-url("../assets/icons/copy_history.png");
                             name: "复制历史";
                             clicked => {
                                 root.open_clipboard_history();
@@ -100,7 +124,7 @@ export component HomeWindow inherits Window {
                         }
 
                         ToolTile {
-                            icon: root.tool_icon;
+                            icon: @image-url("../assets/icons/translation.png");
                             name: "文本翻译";
                             clicked => {
                                 root.open_text_translation();
@@ -108,7 +132,7 @@ export component HomeWindow inherits Window {
                         }
 
                         ToolTile {
-                            icon: root.tool_icon;
+                            icon: @image-url("../assets/icons/file_preview.png");
                             name: "文件预览";
                             clicked => {
                                 root.open_file_preview();
@@ -116,6 +140,14 @@ export component HomeWindow inherits Window {
                         }
                     }
                 }
+            }
+        }
+
+        SettingsButton {
+            x: parent.width - self.width - 20px;
+            y: 18px;
+            clicked => {
+                root.open_settings();
             }
         }
     }

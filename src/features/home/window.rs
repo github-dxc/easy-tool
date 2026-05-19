@@ -5,15 +5,17 @@ use std::sync::{Arc, Mutex};
 
 use slint::{CloseRequestResponse, ComponentHandle};
 
-use crate::assets::load_slint_image;
 use crate::features::clipboard_history::history::ClipboardHistory;
 use crate::features::clipboard_history::window::show_clipboard_history_window;
 use crate::features::file_preview::window::show_empty_file_preview_window;
+use crate::features::settings::window::show_settings_window;
 use crate::features::text_translation::window::show_translation_pending;
 use crate::platform::window::{activate_slint_window, hide_taskbar_icon};
 use crate::{
-    ClipboardHistoryWindow, FilePreviewWindow, HomeWindow, TextTranslationWindow, TimeTrans,
+    ClipboardHistoryWindow, FilePreviewWindow, HomeWindow, SettingsWindow, TextTranslationWindow,
+    TimeTrans,
 };
+use crate::settings::AppSettings;
 
 /// Builds the home window and binds each tool tile to the matching feature window.
 pub fn init_home_window(
@@ -23,10 +25,10 @@ pub fn init_home_window(
     text_translation_window: &TextTranslationWindow,
     translation_cancel_generation: Arc<AtomicU64>,
     file_preview_window: &FilePreviewWindow,
+    settings_window: &SettingsWindow,
+    settings: Arc<Mutex<AppSettings>>,
 ) -> HomeWindow {
     let window = HomeWindow::new().unwrap();
-    window.set_tool_icon(load_app_icon());
-
     window
         .window()
         .on_close_requested(|| CloseRequestResponse::HideWindow);
@@ -65,6 +67,14 @@ pub fn init_home_window(
         }
     });
 
+    let weak_settings = settings_window.as_weak();
+    window.on_open_settings(move || {
+        let settings_snapshot = settings.lock().unwrap().clone();
+        if let Some(ui) = weak_settings.upgrade() {
+            show_settings_window(&ui, &settings_snapshot);
+        }
+    });
+
     window
 }
 
@@ -77,9 +87,4 @@ pub fn show_home_window(window: &HomeWindow) {
 
     let _ = window.show();
     activate_slint_window(window);
-}
-
-fn load_app_icon() -> slint::Image {
-    const ICON_IMG: &[u8] = include_bytes!("../../../assets/icons/icon.png");
-    load_slint_image(ICON_IMG)
 }

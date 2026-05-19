@@ -1,5 +1,4 @@
 import { LineEdit, VerticalBox, ComboBox, Button, Switch } from "std-widgets.slint";
-import { CloseButton } from "components/close.slint";
 import "../assets/font/AlibabaPuHuiTi-3-55-Regular.ttf";
 
 export component TimeTrans inherits Window {
@@ -22,7 +21,6 @@ export component TimeTrans inherits Window {
     in-out property <int> close_time: 3;
     out property <bool> has_hover: false;
     in-out property <bool> has_copy: false;
-    in property <image> close_img;
 
     // 定义回调函数（rust函数）
     callback update_result(input: string, unit: bool, timezone_index: int);
@@ -110,15 +108,30 @@ export component TimeTrans inherits Window {
                     }
                 }
 
-                CloseButton {
-                    close_img: root.close_img;
-                    clicked => {
-                        root.close_window();
-                        root.has_hover = false;
-                        root.has_copy = false;
-                        root.input_value = "";
-                        root.result_value = "";
-                    };
+                // 关闭按钮
+                Rectangle {
+                    width: 24px;
+                    height: 22px;
+                    background: touch.pressed ? #eee : touch.has-hover ? #f5f5f5 : transparent;
+                    border-radius: 4px;
+
+                    Text {
+                        text: "×";
+                        font-size: 18px;
+                        // 核心居中属性
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+
+                    touch := TouchArea {
+                        clicked => {
+                            root.close_window();
+                            root.has_hover = false;
+                            root.has_copy = false;
+                            root.input_value = "";
+                            root.result_value = "";
+                        }
+                    }
                 }
             }
 

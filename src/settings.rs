@@ -34,6 +34,12 @@ pub struct TextTranslationSettings {
     pub enabled: bool,
     #[serde(default)]
     pub direction: TranslationDirection,
+    #[serde(default = "default_text_translation_debounce_seconds")]
+    pub debounce_seconds: u64,
+    #[serde(default)]
+    pub zh_to_en_model_dir: Option<PathBuf>,
+    #[serde(default)]
+    pub en_to_zh_model_dir: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -66,8 +72,15 @@ impl Default for TextTranslationSettings {
         Self {
             enabled: false,
             direction: TranslationDirection::ZhToEn,
+            debounce_seconds: default_text_translation_debounce_seconds(),
+            zh_to_en_model_dir: None,
+            en_to_zh_model_dir: None,
         }
     }
+}
+
+fn default_text_translation_debounce_seconds() -> u64 {
+    1
 }
 
 impl Default for TranslationDirection {
@@ -79,9 +92,21 @@ impl Default for TranslationDirection {
 impl TextTranslationSettings {
     pub fn model_path(&self) -> PathBuf {
         match self.direction {
-            TranslationDirection::ZhToEn => zh_to_en_translation_model_path(),
-            TranslationDirection::EnToZh => en_to_zh_translation_model_path(),
+            TranslationDirection::ZhToEn => self.zh_to_en_model_path(),
+            TranslationDirection::EnToZh => self.en_to_zh_model_path(),
         }
+    }
+
+    pub fn zh_to_en_model_path(&self) -> PathBuf {
+        self.zh_to_en_model_dir
+            .clone()
+            .unwrap_or_else(default_zh_to_en_translation_model_path)
+    }
+
+    pub fn en_to_zh_model_path(&self) -> PathBuf {
+        self.en_to_zh_model_dir
+            .clone()
+            .unwrap_or_else(default_en_to_zh_translation_model_path)
     }
 }
 
@@ -136,14 +161,14 @@ fn default_config_path() -> PathBuf {
         .join("config.toml")
 }
 
-fn zh_to_en_translation_model_path() -> PathBuf {
+fn default_zh_to_en_translation_model_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("resource")
         .join("Xenova")
         .join("opus-mt-zh-en")
 }
 
-fn en_to_zh_translation_model_path() -> PathBuf {
+fn default_en_to_zh_translation_model_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("resource")
         .join("Xenova")

@@ -18,10 +18,10 @@ use crate::features::clipboard_history::window::{
 use crate::features::file_preview::registry::register_file_context_menu;
 use crate::features::file_preview::window::{init_file_preview_window, show_file_preview_window};
 use crate::features::home::window::{init_home_window, show_home_window};
+use crate::features::settings::window::init_settings_window;
 use crate::features::text_translation::translator::TranslationService;
 use crate::features::text_translation::window::{
-    init_text_translation_window, show_translation_partial, show_translation_pending,
-    show_translation_result,
+    init_text_translation_window, trigger_translation,
 };
 use crate::features::time_trans::window::init_time_trans_window;
 use crate::infrastructure::clipboard_listener::start_clipboard_history_listener;
@@ -65,19 +65,29 @@ pub fn run() {
     let time_trans_window = init_time_trans_window();
     let weak_window = time_trans_window.as_weak();
     let translation_cancel_generation = Arc::new(AtomicU64::new(0));
-    let text_translation_window =
-        init_text_translation_window(Arc::clone(&translation_cancel_generation));
-    let weak_translation_window = text_translation_window.as_weak();
-    let clipboard_history = Arc::new(Mutex::new(ClipboardHistory::default()));
-    let suppress_shortcuts = Arc::new(AtomicBool::new(false));
     let translation_service = Arc::new(TranslationService::new(
         &settings.lock().unwrap().text_translation,
     ));
+    let text_translation_window = init_text_translation_window(
+        Arc::clone(&translation_cancel_generation),
+        Arc::clone(&settings),
+        Arc::clone(&translation_service),
+    );
+    let weak_translation_window = text_translation_window.as_weak();
+    let clipboard_history = Arc::new(Mutex::new(ClipboardHistory::default()));
+    let suppress_shortcuts = Arc::new(AtomicBool::new(false));
     let clipboard_history_window = init_clipboard_history_window(
         Arc::clone(&clipboard_history),
         Arc::clone(&suppress_shortcuts),
     );
     let file_preview_window = init_file_preview_window(false);
+    let tray_state = init_tray_icon(&settings.lock().unwrap());
+    let settings_window = init_settings_window(
+        Arc::clone(&settings),
+        settings_store.clone(),
+        Arc::clone(&translation_service),
+        tray_state.menu_handles(),
+    );
     let home_window = init_home_window(
         &time_trans_window,
         &clipboard_history_window,
@@ -85,9 +95,10 @@ pub fn run() {
         &text_translation_window,
         Arc::clone(&translation_cancel_generation),
         &file_preview_window,
+        &settings_window,
+        Arc::clone(&settings),
     );
     let weak_history_window = clipboard_history_window.as_weak();
-    let tray_state = init_tray_icon(&settings.lock().unwrap());
     start_clipboard_history_listener(
         Arc::clone(&clipboard_history),
         Arc::clone(&settings),
@@ -135,8 +146,6 @@ pub fn run() {
                     let translation_cancel_generation = Arc::clone(&translation_cancel_generation);
                     let weak_translation_window = weak_translation_window.clone();
                     std::thread::spawn(move || {
-                        let translation_run_id =
-                            translation_cancel_generation.fetch_add(1, Ordering::SeqCst) + 1;
                         std::thread::sleep(Duration::from_millis(200));
 
                         let source_text = Clipboard::new()
@@ -148,57 +157,12 @@ pub fn run() {
                             return;
                         };
 
-                        let pending_source = source_text.clone();
-                        if let Err(err) =
-                            weak_translation_window.upgrade_in_event_loop(move |window| {
-                                show_translation_pending(&window, &pending_source);
-                            })
-                        {
-                            log::error!("show translation window failed: {err}");
-                            return;
-                        }
-
-                        let partial_window = weak_translation_window.clone();
-                        let partial_cancel_generation = Arc::clone(&translation_cancel_generation);
-                        let translated_text = translation_service
-                            .translate_streaming_cancellable(
-                                &source_text,
-                                move |partial_text| {
-                                    if partial_cancel_generation.load(Ordering::SeqCst)
-                                        != translation_run_id
-                                    {
-                                        return;
-                                    }
-
-                                    let partial_text = partial_text.to_string();
-                                    if let Err(err) =
-                                        partial_window.upgrade_in_event_loop(move |window| {
-                                            show_translation_partial(&window, &partial_text);
-                                        })
-                                    {
-                                        log::error!("show partial translation failed: {err}");
-                                    }
-                                },
-                                || {
-                                    translation_cancel_generation.load(Ordering::SeqCst)
-                                        != translation_run_id
-                                },
-                            )
-                            .unwrap_or_else(|err| format!("翻译失败: {err}"));
-
-                        if translation_cancel_generation.load(Ordering::SeqCst)
-                            != translation_run_id
-                        {
-                            return;
-                        }
-
-                        if let Err(err) =
-                            weak_translation_window.upgrade_in_event_loop(move |window| {
-                                show_translation_result(&window, &translated_text);
-                            })
-                        {
-                            log::error!("show translation result failed: {err}");
-                        }
+                        trigger_translation(
+                            weak_translation_window,
+                            translation_cancel_generation,
+                            translation_service,
+                            source_text,
+                        );
                     });
                 }
 

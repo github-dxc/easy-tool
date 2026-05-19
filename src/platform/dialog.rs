@@ -74,6 +74,11 @@ pub fn open_file_dialog(title: &str) -> Option<PathBuf> {
     )))
 }
 
+/// Opens a native folder picker and returns the selected directory.
+pub fn open_folder_dialog(title: &str) -> Option<PathBuf> {
+    rfd::FileDialog::new().set_title(title).pick_folder()
+}
+
 #[cfg(not(target_os = "windows"))]
 /// Falls back to stderr when a native dialog is not implemented.
 pub fn show_message_box(title: &str, message: &str) {

@@ -38,12 +38,26 @@ export component FilePreviewWindow inherits Window {
                     alignment: center;
                     spacing: 12px;
 
-                    Button {
-                        width: 96px;
-                        height: 32px;
-                        text: "Open";
-                        clicked => {
-                            root.open_file();
+                    HorizontalLayout {
+                        spacing: 0px;
+
+                        Rectangle {
+                            horizontal-stretch: 1;
+                            background: transparent;
+                        }
+
+                        Button {
+                            width: 96px;
+                            height: 32px;
+                            text: "Open";
+                            clicked => {
+                                root.open_file();
+                            }
+                        }
+
+                        Rectangle {
+                            horizontal-stretch: 1;
+                            background: transparent;
                         }
                     }
 

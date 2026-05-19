@@ -11,6 +11,7 @@ export component TextTranslationWindow inherits Window {
     in-out property <string> source_text: "";
     in-out property <string> translated_text: "";
     in-out property <bool> translating: false;
+    callback source_text_edited(text: string);
 
     Rectangle {
         background: #F6F7F9;
@@ -30,10 +31,12 @@ export component TextTranslationWindow inherits Window {
                 TextEdit {
                     width: parent.width;
                     height: parent.height;
-                    read-only: true;
                     wrap: word-wrap;
                     font-size: 14px;
-                    text: root.source_text;
+                    text <=> root.source_text;
+                    edited(text) => {
+                        root.source_text_edited(text);
+                    }
                 }
             }
 

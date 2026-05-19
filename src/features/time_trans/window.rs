@@ -5,7 +5,6 @@ use i_slint_backend_winit::WinitWindowAccessor;
 use slint::ComponentHandle;
 
 use crate::TimeTrans;
-use crate::assets::load_slint_image;
 use crate::config::{TIMEZONE_LABELS, TIMEZONES};
 use crate::features::time_trans::converter::trans_string_timestamp;
 use crate::platform::window::hide_taskbar_icon;
@@ -16,7 +15,6 @@ pub fn init_time_trans_window() -> TimeTrans {
 
     time_window.set_timezone_index(0);
     time_window.set_timezone_label(TIMEZONE_LABELS[0].into());
-    time_window.set_close_img(load_close_image());
 
     bind_visibility_callbacks(&time_window);
     bind_clipboard_callbacks(&time_window);
@@ -27,10 +25,10 @@ pub fn init_time_trans_window() -> TimeTrans {
     time_window
 }
 
-fn load_close_image() -> slint::Image {
-    const CLOSE_IMG: &[u8] = include_bytes!("../../../assets/icons/close.png");
-    load_slint_image(CLOSE_IMG)
-}
+// fn load_close_image() -> slint::Image {
+//     const CLOSE_IMG: &[u8] = include_bytes!("../../../assets/icons/close.png");
+//     load_slint_image(CLOSE_IMG)
+// }
 
 fn bind_visibility_callbacks(time_window: &TimeTrans) {
     let weak = time_window.as_weak();

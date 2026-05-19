@@ -27,13 +27,49 @@ pub struct TrayState {
     text_translation_en_zh_item: CheckMenuItem,
 }
 
+#[derive(Clone)]
+pub struct TrayMenuHandles {
+    copy_timestamp_item: CheckMenuItem,
+    clipboard_history_item: CheckMenuItem,
+    text_translation_zh_en_item: CheckMenuItem,
+    text_translation_en_zh_item: CheckMenuItem,
+}
+
+impl TrayState {
+    pub fn menu_handles(&self) -> TrayMenuHandles {
+        TrayMenuHandles {
+            copy_timestamp_item: self.copy_timestamp_item.clone(),
+            clipboard_history_item: self.clipboard_history_item.clone(),
+            text_translation_zh_en_item: self.text_translation_zh_en_item.clone(),
+            text_translation_en_zh_item: self.text_translation_en_zh_item.clone(),
+        }
+    }
+}
+
+impl TrayMenuHandles {
+    pub fn sync_from_settings(&self, settings: &AppSettings) {
+        self.copy_timestamp_item
+            .set_checked(settings.copy_timestamp.enabled);
+        self.clipboard_history_item
+            .set_checked(settings.clipboard_history.enabled);
+        self.text_translation_zh_en_item.set_checked(
+            settings.text_translation.enabled
+                && settings.text_translation.direction == TranslationDirection::ZhToEn,
+        );
+        self.text_translation_en_zh_item.set_checked(
+            settings.text_translation.enabled
+                && settings.text_translation.direction == TranslationDirection::EnToZh,
+        );
+    }
+}
+
 /// Creates the tray icon and initializes menu check states from settings.
 pub fn init_tray_icon(settings: &AppSettings) -> TrayState {
     let tray_menu = Menu::new();
 
     let copy_timestamp_item = CheckMenuItem::with_id(
         COPY_TIMESTAMP_MENU_ID,
-        "复制后显示时间戳",
+        "显示时间戳 - ctrl+c",
         true,
         settings.copy_timestamp.enabled,
         None,
@@ -42,14 +78,14 @@ pub fn init_tray_icon(settings: &AppSettings) -> TrayState {
 
     let clipboard_history_item = CheckMenuItem::with_id(
         CLIPBOARD_HISTORY_MENU_ID,
-        "启用复制历史",
+        "复制历史 - ctrl+shift+c",
         true,
         settings.clipboard_history.enabled,
         None,
     );
     tray_menu.append(&clipboard_history_item).unwrap();
 
-    let text_translation_menu = Submenu::new("复制翻译文本", true);
+    let text_translation_menu = Submenu::new("翻译文本 - ctrl+c", true);
     let text_translation_zh_en_item = CheckMenuItem::with_id(
         TEXT_TRANSLATION_ZH_EN_MENU_ID,
         "中译英",
