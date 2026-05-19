@@ -14,6 +14,7 @@ export component SettingsWindow inherits Window {
     in-out property <string> zh_to_en_model_dir: "";
     in-out property <string> en_to_zh_model_dir: "";
     in-out property <string> text_translation_debounce_seconds: "1";
+    in-out property <string> last_valid_text_translation_debounce_seconds: "1";
 
     callback browse_zh_to_en_model_dir();
     callback browse_en_to_zh_model_dir();
@@ -165,30 +166,38 @@ export component SettingsWindow inherits Window {
                         }
                     }
 
-                    VerticalLayout {
-                        spacing: 8px;
+                    HorizontalLayout {
+                        spacing: 16px;
 
                         Text {
-                            text: "鑷姩缈昏瘧寤舵椂锛堢锛?";
+                            text: "翻译防抖时间（秒）";
                             color: #223041;
                             font-size: 14px;
-                            font-weight: 700;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
                         }
 
                         LineEdit {
                             text <=> root.text_translation_debounce_seconds;
-                            placeholder-text: "榛樿 1";
-                            edited => {
-                                root.apply_settings(
-                                    root.copy_timestamp_enabled,
-                                    root.clipboard_history_enabled,
-                                    root.text_translation_enabled,
-                                    root.zh_to_en_enabled,
-                                    root.zh_to_en_model_dir,
-                                    root.en_to_zh_model_dir,
-                                    root.text_translation_debounce_seconds
-                                );
-                            }
+                            placeholder-text: "默认 1";
+                            edited(new_text) => {
+                                // 使用正则判断是否为纯数字
+                                // 如果不是数字，恢复成上一次的旧值
+                                if (new_text != "" && new_text.is-float()) {
+                                    root.apply_settings(
+                                        root.copy_timestamp_enabled,
+                                        root.clipboard_history_enabled,
+                                        root.text_translation_enabled,
+                                        root.zh_to_en_enabled,
+                                        root.zh_to_en_model_dir,
+                                        root.en_to_zh_model_dir,
+                                        root.text_translation_debounce_seconds
+                                    );
+                                    root.last_valid_text_translation_debounce_seconds = new_text;
+                                } else {
+                                    root.text_translation_debounce_seconds = root.last_valid_text_translation_debounce_seconds;
+                                }
+                            };
                         }
                     }
                 }

@@ -140,6 +140,9 @@ pub fn show_settings_window(window: &SettingsWindow, settings: &AppSettings) {
     window.set_text_translation_debounce_seconds(
         settings.text_translation.debounce_seconds.to_string().into(),
     );
+    window.set_last_valid_text_translation_debounce_seconds(
+        settings.text_translation.debounce_seconds.to_string().into(),
+    );
 
     let _ = window.show();
     activate_slint_window(window);
