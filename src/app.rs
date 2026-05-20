@@ -18,6 +18,9 @@ use crate::features::clipboard_history::window::{
 use crate::features::file_preview::registry::register_file_context_menu;
 use crate::features::file_preview::window::{init_file_preview_window, show_file_preview_window};
 use crate::features::home::window::{init_home_window, show_home_window};
+use crate::features::screenshot::window::{
+    cancel_screenshot_window, init_screenshot_window, show_screenshot_window,
+};
 use crate::features::settings::window::init_settings_window;
 use crate::features::text_translation::translator::TranslationService;
 use crate::features::text_translation::window::{
@@ -81,6 +84,7 @@ pub fn run() {
         Arc::clone(&suppress_shortcuts),
     );
     let file_preview_window = init_file_preview_window(false);
+    let screenshot_window = init_screenshot_window();
     let tray_state = init_tray_icon(&settings.lock().unwrap());
     let settings_window = init_settings_window(
         Arc::clone(&settings),
@@ -95,6 +99,7 @@ pub fn run() {
         &text_translation_window,
         Arc::clone(&translation_cancel_generation),
         &file_preview_window,
+        &screenshot_window,
         &settings_window,
         Arc::clone(&settings),
     );
@@ -109,6 +114,7 @@ pub fn run() {
     let mouse_x = Arc::new(Mutex::new(0f64));
     let mouse_y = Arc::new(Mutex::new(0f64));
     let shortcut_state = Arc::new(Mutex::new(ShortcutState::default()));
+    let weak_screenshot_window = screenshot_window.as_weak();
     start_global_input_listener({
         let mouse_x = Arc::clone(&mouse_x);
         let mouse_y = Arc::clone(&mouse_y);
@@ -119,11 +125,20 @@ pub fn run() {
         let translation_service = Arc::clone(&translation_service);
         let translation_cancel_generation = Arc::clone(&translation_cancel_generation);
         let weak_translation_window = weak_translation_window.clone();
+        let weak_screenshot_window = weak_screenshot_window.clone();
 
         move |event| {
             if let EventType::MouseMove { x, y } = event.event_type {
                 *mouse_x.lock().unwrap() = x;
                 *mouse_y.lock().unwrap() = y;
+            }
+
+            if matches!(event.event_type, EventType::KeyPress(Key::Escape)) {
+                let _ = weak_screenshot_window.upgrade_in_event_loop(move |window| {
+                    if window.window().is_visible() {
+                        cancel_screenshot_window(&window);
+                    }
+                });
             }
 
             let should_show_history = update_shortcut_state(&shortcut_state, &event.event_type);
@@ -137,6 +152,17 @@ pub fn run() {
                         })
                         .expect("failed to show clipboard history window");
                 }
+            }
+
+            if should_show_screenshot(&shortcut_state, &event.event_type)
+                && !suppress_shortcuts.load(Ordering::SeqCst)
+            {
+                shortcut_state.lock().unwrap().clear();
+                weak_screenshot_window
+                    .upgrade_in_event_loop(move |window| {
+                        show_screenshot_window(&window);
+                    })
+                    .expect("failed to show screenshot window");
             }
 
             if event.name.as_deref() == Some("\u{3}") {
@@ -236,16 +262,18 @@ fn next_window_position(window: &crate::TimeTrans, cur_x: f64, cur_y: f64) -> (f
     (move_x, move_y)
 }
 
-// Tracks modifier state for the global Ctrl+Shift+C clipboard-history shortcut.
+// Tracks modifier state for global shortcuts.
 #[derive(Default)]
 struct ShortcutState {
     ctrl: bool,
+    alt: bool,
     shift: bool,
 }
 
 impl ShortcutState {
     fn clear(&mut self) {
         self.ctrl = false;
+        self.alt = false;
         self.shift = false;
     }
 }
@@ -259,6 +287,8 @@ fn update_shortcut_state(
     match event_type {
         EventType::KeyPress(Key::ControlLeft | Key::ControlRight) => state.ctrl = true,
         EventType::KeyRelease(Key::ControlLeft | Key::ControlRight) => state.ctrl = false,
+        EventType::KeyPress(Key::Alt | Key::AltGr) => state.alt = true,
+        EventType::KeyRelease(Key::Alt | Key::AltGr) => state.alt = false,
         EventType::KeyPress(Key::ShiftLeft | Key::ShiftRight) => state.shift = true,
         EventType::KeyRelease(Key::ShiftLeft | Key::ShiftRight) => state.shift = false,
         EventType::KeyPress(Key::KeyC) => return state.ctrl && state.shift,
@@ -266,4 +296,12 @@ fn update_shortcut_state(
     }
 
     false
+}
+
+fn should_show_screenshot(
+    shortcut_state: &Arc<Mutex<ShortcutState>>,
+    event_type: &EventType,
+) -> bool {
+    let state = shortcut_state.lock().unwrap();
+    matches!(event_type, EventType::KeyPress(Key::KeyZ)) && state.alt && state.shift
 }

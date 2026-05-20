@@ -76,6 +76,7 @@ export component HomeWindow inherits Window {
     callback open_clipboard_history();
     callback open_text_translation();
     callback open_file_preview();
+    callback open_screenshot();
     callback open_settings();
 
     Rectangle {
@@ -136,6 +137,14 @@ export component HomeWindow inherits Window {
                             name: "文件预览";
                             clicked => {
                                 root.open_file_preview();
+                            }
+                        }
+
+                        ToolTile {
+                            icon: @image-url("../assets/icons/icon.png");
+                            name: "截图";
+                            clicked => {
+                                root.open_screenshot();
                             }
                         }
                     }

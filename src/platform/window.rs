@@ -9,7 +9,12 @@ use crate::TimeTrans;
 
 /// Moves the timestamp floating window to an absolute screen position.
 pub fn set_position(time_window: &TimeTrans, x: f64, y: f64) {
-    time_window.window().with_winit_window(|winit_window| {
+    set_window_position(time_window, x, y);
+}
+
+/// Moves any Slint window to an absolute screen position.
+pub fn set_window_position(window: &impl ComponentHandle, x: f64, y: f64) {
+    window.window().with_winit_window(|winit_window| {
         winit_window.set_outer_position(PhysicalPosition::new(x, y));
     });
 }
@@ -31,7 +36,12 @@ pub fn display_size(time_window: &TimeTrans) -> Option<(f64, f64)> {
 
 /// Marks the floating window as a tool window so it stays out of the taskbar.
 pub fn hide_taskbar_icon(time_window: &TimeTrans) {
-    time_window.window().with_winit_window(|winit_window| {
+    hide_taskbar_icon_for(time_window);
+}
+
+/// Marks any Slint window as a tool window so it stays out of the taskbar.
+pub fn hide_taskbar_icon_for(window: &impl ComponentHandle) {
+    window.window().with_winit_window(|winit_window| {
         if let Ok(handle) = winit_window.window_handle()
             && let RawWindowHandle::Win32(win32_handle) = handle.as_raw()
         {

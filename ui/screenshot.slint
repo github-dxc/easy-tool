@@ -1,0 +1,296 @@
+import "../assets/font/AlibabaPuHuiTi-3-55-Regular.ttf";
+
+// 升级版工具按钮：支持激活状态（高亮）
+component ToolButton inherits Rectangle {
+    in property <string> icon_text: "";
+    in property <bool> is_active: false;
+    in property <brush> hover_bg: #F1F3F4;
+    in property <brush> active_bg: #E8F0FE;
+    in property <brush> text_color: #5F6368;
+    in property <brush> active_text_color: #1A73E8;
+    
+    callback clicked;
+
+    width: 32px;
+    height: 32px;
+    border-radius: 4px;
+    background: root.is_active ? root.active_bg : (touch.has-hover ? root.hover_bg : transparent);
+    
+    touch := TouchArea {
+        clicked => { root.clicked(); }
+    }
+
+    Text {
+        text: root.icon_text;
+        font-size: 16px;
+        color: root.is_active ? root.active_text_color : root.text_color;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}
+
+export component ScreenshotWindow inherits Window {
+    no-frame: true;
+    always-on-top: true;
+    background: transparent;
+    default-font-family: "Alibaba PuHuiTi 3.0";
+
+    in-out property <image> screenshot;
+    in-out property <bool> has_selection: false;
+    in-out property <bool> is_dragging: false;
+    in-out property <length> mouse_x: 0px;
+    in-out property <length> mouse_y: 0px;
+    
+    in-out property <length> start_x: 0px;
+    in-out property <length> start_y: 0px;
+    in-out property <length> current_x: 0px;
+    in-out property <length> current_y: 0px;
+    
+    // 选区坐标计算
+    in property <length> selection_left: min(root.start_x, root.current_x);
+    in property <length> selection_top: min(root.start_y, root.current_y);
+    in property <length> selection_right: max(root.start_x, root.current_x);
+    in property <length> selection_bottom: max(root.start_y, root.current_y);
+    in property <length> selection_width: root.selection_right - root.selection_left + 1px;
+    in property <length> selection_height: root.selection_bottom - root.selection_top + 1px;
+    
+    // 状态判定
+    in property <bool> selection_ready: root.has_selection && root.selection_width >= 4px && root.selection_height >= 4px;
+    
+    // 只有选区就绪且【鼠标左键已松开】时，才允许显示工具栏
+    in property <bool> show_toolbar: root.selection_ready && !root.is_dragging;
+    
+    // 记录当前激活的标注工具 ("rect", "circle", "arrow", "brush", "text", "mosaic")
+    in-out property <string> active_tool: "";
+
+    in property <brush> dim_overlay: rgba(0, 0, 0, 0.35);
+
+    callback copy_selection(x: int, y: int, width: int, height: int);
+    callback save_selection(x: int, y: int, width: int, height: int);
+    callback cancel();
+    
+    // 定义给 Rust 后端调用的聚焦回调
+    callback focus_overlay();
+
+    // 触发 focus_overlay 时强制让内部 FocusScope 获取焦点
+    focus_overlay => {
+        overlay_focus.focus();
+    }
+
+    overlay_focus := FocusScope {
+        width: parent.width;
+        height: parent.height;
+
+        key-pressed(event) => {
+            if (event.text == Key.Escape) {
+                root.cancel();
+                accept
+            } else {
+                reject
+            }
+        }
+
+        // 1. 底层：屏幕截图
+        Image {
+            width: root.width;
+            height: root.height;
+            source: root.screenshot;
+            image-fit: fill;
+        }
+
+        // 2. 遮罩层（未框选时）：全屏变暗
+        if !root.has_selection: Rectangle {
+            x: 0px; y: 0px;
+            width: root.width;
+            height: root.height;
+            background: root.dim_overlay;
+        }
+
+        // 3. 遮罩层（框选中/后）：使用 4 个矩形严密包裹选区（绝对定位压死，彻底防偏移）
+        if root.has_selection: Rectangle {
+            x: 0px; y: 0px;
+            width: root.width;
+            height: root.selection_top;
+            background: root.dim_overlay;
+        }
+        if root.has_selection: Rectangle {
+            x: 0px; y: root.selection_top;
+            width: root.selection_left;
+            height: root.selection_bottom - root.selection_top;
+            background: root.dim_overlay;
+        }
+        if root.has_selection: Rectangle {
+            x: root.selection_right; y: root.selection_top;
+            width: root.width - root.selection_right;
+            height: root.selection_bottom - root.selection_top;
+            background: root.dim_overlay;
+        }
+        if root.has_selection: Rectangle {
+            x: 0px; y: root.selection_bottom;
+            width: root.width;
+            height: root.height - root.selection_bottom;
+            background: root.dim_overlay;
+        }
+
+        // 4. 十字辅助线 (仅在未完成框选时显示，框选完自动隐藏，保持画面干净)
+        if !root.selection_ready: Rectangle {
+            x: root.mouse_x; y: 0px;
+            width: 1px; height: root.height;
+            background: rgba(76, 139, 245, 0.3);
+        }
+        if !root.selection_ready: Rectangle {
+            x: 0px; y: root.mouse_y;
+            width: root.width; height: 1px;
+            background: rgba(76, 139, 245, 0.3);
+        }
+
+        // 5. 交互层：处理鼠标拖拽
+        touch := TouchArea {
+            width: parent.width;
+            height: parent.height;
+
+            pointer-event(event) => {
+                if (event.kind == PointerEventKind.move) {
+                    root.mouse_x = self.mouse-x;
+                    root.mouse_y = self.mouse-y;
+                    if (root.is_dragging) {
+                        root.current_x = self.mouse-x;
+                        root.current_y = self.mouse-y;
+                    }
+                }
+
+                if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
+                    root.start_x = self.mouse-x;
+                    root.start_y = self.mouse-y;
+                    root.current_x = self.mouse-x;
+                    root.current_y = self.mouse-y;
+                    root.is_dragging = true;
+                    root.has_selection = true;
+                }
+
+                if (event.button == PointerEventButton.left && event.kind == PointerEventKind.up) {
+                    // 核心逻辑：这里只改变拖拽状态，不销毁选区，触发 show_toolbar 显现
+                    root.is_dragging = false;
+                }
+            }
+        }
+
+        // 6. 装饰层：选区蓝色边框
+        if root.selection_ready: Rectangle {
+            x: root.selection_left;
+            y: root.selection_top;
+            width: root.selection_width;
+            height: root.selection_height;
+            background: transparent;
+            border-width: 2px;
+            border-color: #4C8BF5;
+        }
+
+        // 7. 尺寸提示框 (左上角动态定位)
+        if root.has_selection: Rectangle {
+            width: 76px;
+            height: 22px;
+            x: min(root.selection_left, root.width - self.width);
+            y: root.selection_top >= 26px ? root.selection_top - 26px : root.selection_top + 4px;
+            background: rgba(0, 0, 0, 0.7);
+            border-radius: 3px;
+
+            Text {
+                width: parent.width; height: parent.height;
+                color: white; font-size: 11px; font-weight: 700;
+                horizontal-alignment: center; vertical-alignment: center;
+
+                // ✨ 核心修改：动态计算 DPI 缩放比，并乘回给显示尺寸
+                property <float> scale: root.screenshot.width / (root.width / 1px);
+                
+                text: Math.round((root.selection_width / 1px) * scale) + " x " + Math.round((root.selection_height / 1px) * scale);
+            }
+        }
+
+        // 8. 提示文字（未框选时显示）
+        if !root.has_selection: Text {
+            x: 0px;
+            y: root.height / 2 - 18px;
+            width: root.width; height: 36px;
+            text: "拖拽选择截图区域，Esc 取消";
+            color: white; font-size: 20px;
+            horizontal-alignment: center; vertical-alignment: center;
+        }
+
+        // 9. 升级版全功能工具栏 (仅在松开鼠标 show_toolbar 为真时弹出)
+        if root.show_toolbar: Rectangle {
+            // 定位算法：紧贴选区右下角，且做防溢出边界处理
+            x: min(max(root.selection_left + root.selection_width - self.width, 8px), root.width - self.width - 8px);
+            y: root.selection_bottom + 8px + self.height < root.height
+                ? root.selection_bottom + 8px
+                : root.selection_top - self.height - 8px;
+            
+            width: 410px; // 拓宽容器以容纳更多按钮
+            height: 40px;
+            background: rgba(255, 255, 255, 0.98);
+            border-width: 1px;
+            border-color: #DADCE0;
+            border-radius: 6px;
+            drop-shadow-blur: 8px;
+            drop-shadow-color: rgba(0,0,0,0.15);
+
+            HorizontalLayout {
+                padding-left: 8px;
+                padding-right: 8px;
+                spacing: 4px;
+                alignment: center;
+
+                // --- 标注功能组 ---
+                ToolButton { 
+                    icon_text: "▭"; is_active: root.active_tool == "rect";
+                    clicked => { root.active_tool = root.active_tool == "rect" ? "" : "rect"; }
+                }
+                ToolButton { 
+                    icon_text: "○"; is_active: root.active_tool == "circle";
+                    clicked => { root.active_tool = root.active_tool == "circle" ? "" : "circle"; }
+                }
+                ToolButton { 
+                    icon_text: "↗"; is_active: root.active_tool == "arrow";
+                    clicked => { root.active_tool = root.active_tool == "arrow" ? "" : "arrow"; }
+                }
+                ToolButton { 
+                    icon_text: "✎"; is_active: root.active_tool == "brush";
+                    clicked => { root.active_tool = root.active_tool == "brush" ? "" : "brush"; }
+                }
+                ToolButton { 
+                    icon_text: "Ｔ"; is_active: root.active_tool == "text";
+                    clicked => { root.active_tool = root.active_tool == "text" ? "" : "text"; }
+                }
+                ToolButton { 
+                    icon_text: "░"; is_active: root.active_tool == "mosaic";
+                    clicked => { root.active_tool = root.active_tool == "mosaic" ? "" : "mosaic"; }
+                }
+
+                // 分隔线
+                Rectangle {
+                    width: 1px;
+                    height: 22px;
+                    background: #E8EAED;
+                }
+
+                // --- 基础控制组 ---
+                ToolButton {
+                    icon_text: "✔"; text_color: #1A73E8; hover_bg: #E8F0FE;
+                    clicked => {
+                        root.copy_selection(root.selection_left / 1px, root.selection_top / 1px, root.selection_width / 1px, root.selection_height / 1px);
+                    }
+                }
+                ToolButton {
+                    icon_text: "💾";
+                    clicked => {
+                        root.save_selection(root.selection_left / 1px, root.selection_top / 1px, root.selection_width / 1px, root.selection_height / 1px);
+                    }
+                }
+                ToolButton {
+                    icon_text: "✘"; text_color: #D93025; hover_bg: #FCE8E6;
+                    clicked => { root.cancel(); }
+                }
+            }
+        }
+    }
+}

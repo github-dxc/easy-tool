@@ -8,14 +8,15 @@ use slint::{CloseRequestResponse, ComponentHandle};
 use crate::features::clipboard_history::history::ClipboardHistory;
 use crate::features::clipboard_history::window::show_clipboard_history_window;
 use crate::features::file_preview::window::show_empty_file_preview_window;
+use crate::features::screenshot::window::show_screenshot_window;
 use crate::features::settings::window::show_settings_window;
 use crate::features::text_translation::window::show_translation_pending;
 use crate::platform::window::{activate_slint_window, hide_taskbar_icon};
-use crate::{
-    ClipboardHistoryWindow, FilePreviewWindow, HomeWindow, SettingsWindow, TextTranslationWindow,
-    TimeTrans,
-};
 use crate::settings::AppSettings;
+use crate::{
+    ClipboardHistoryWindow, FilePreviewWindow, HomeWindow, ScreenshotWindow, SettingsWindow,
+    TextTranslationWindow, TimeTrans,
+};
 
 /// Builds the home window and binds each tool tile to the matching feature window.
 pub fn init_home_window(
@@ -25,6 +26,7 @@ pub fn init_home_window(
     text_translation_window: &TextTranslationWindow,
     translation_cancel_generation: Arc<AtomicU64>,
     file_preview_window: &FilePreviewWindow,
+    screenshot_window: &ScreenshotWindow,
     settings_window: &SettingsWindow,
     settings: Arc<Mutex<AppSettings>>,
 ) -> HomeWindow {
@@ -64,6 +66,13 @@ pub fn init_home_window(
         if let Some(ui) = weak_preview.upgrade() {
             show_empty_file_preview_window(&ui);
             activate_slint_window(&ui);
+        }
+    });
+
+    let weak_screenshot = screenshot_window.as_weak();
+    window.on_open_screenshot(move || {
+        if let Some(ui) = weak_screenshot.upgrade() {
+            show_screenshot_window(&ui);
         }
     });
 
