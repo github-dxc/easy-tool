@@ -2,12 +2,10 @@ import "../assets/font/AlibabaPuHuiTi-3-55-Regular.ttf";
 
 // 升级版工具按钮：支持激活状态（高亮）
 component ToolButton inherits Rectangle {
-    in property <string> icon_text: "";
+    in property <image> icon;
     in property <bool> is_active: false;
     in property <brush> hover_bg: #F1F3F4;
     in property <brush> active_bg: #E8F0FE;
-    in property <brush> text_color: #5F6368;
-    in property <brush> active_text_color: #1A73E8;
     
     callback clicked;
 
@@ -20,12 +18,88 @@ component ToolButton inherits Rectangle {
         clicked => { root.clicked(); }
     }
 
-    Text {
-        text: root.icon_text;
-        font-size: 16px;
-        color: root.is_active ? root.active_text_color : root.text_color;
+
+    Image {
+        source: root.icon;
+        height: 16px;
+        width: 16px;
         horizontal-alignment: center;
         vertical-alignment: center;
+    }
+}
+
+component ColorSwatch inherits Rectangle {
+    in property <brush> swatch_color: #FF4D4F;
+    in property <bool> is_active: false;
+    callback clicked;
+
+    width: 24px;
+    height: 24px;
+    border-radius: 12px;
+    background: transparent;
+    border-width: root.is_active ? 2px : 1px;
+    border-color: root.is_active ? #1A73E8 : #DADCE0;
+
+    Rectangle {
+        x: 4px;
+        y: 4px;
+        width: 16px;
+        height: 16px;
+        border-radius: 8px;
+        background: root.swatch_color;
+        border-width: 1px;
+        border-color: #DADCE0;
+    }
+
+    touch := TouchArea {
+        clicked => { root.clicked(); }
+    }
+}
+
+component StrokeOption inherits Rectangle {
+    in property <int> stroke_value: 3;
+    in property <bool> is_active: false;
+    callback clicked;
+
+    width: 34px;
+    height: 28px;
+    border-radius: 4px;
+    background: root.is_active ? #E8F0FE : (touch.has-hover ? #F1F3F4 : transparent);
+
+    Rectangle {
+        width: 20px;
+        height: root.stroke_value * 1px;
+        border-radius: root.stroke_value * 1px / 2;
+        background: #202124;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+    }
+
+    touch := TouchArea {
+        clicked => { root.clicked(); }
+    }
+}
+
+component TextSizeOption inherits Rectangle {
+    in property <int> size_value: 24;
+    in property <bool> is_active: false;
+    callback clicked;
+
+    width: 34px;
+    height: 28px;
+    border-radius: 4px;
+    background: root.is_active ? #E8F0FE : (touch.has-hover ? #F1F3F4 : transparent);
+
+    Text {
+        text: "T";
+        font-size: root.size_value * 1px;
+        color: #202124;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    touch := TouchArea {
+        clicked => { root.clicked(); }
     }
 }
 
@@ -45,6 +119,40 @@ export component ScreenshotWindow inherits Window {
     in-out property <length> start_y: 0px;
     in-out property <length> current_x: 0px;
     in-out property <length> current_y: 0px;
+    in-out property <bool> is_annotating: false;
+    in-out property <length> annotation_start_x: 0px;
+    in-out property <length> annotation_start_y: 0px;
+    in-out property <length> annotation_last_x: 0px;
+    in-out property <length> annotation_last_y: 0px;
+    in-out property <bool> text_editor_visible: false;
+    in-out property <length> text_editor_x: 0px;
+    in-out property <length> text_editor_y: 0px;
+    in-out property <string> text_editor_value: "";
+    in-out property <int> selected_stroke_width: 3;
+    in-out property <int> selected_text_size: 24;
+    in-out property <int> selected_color_index: 0;
+    in property <brush> annotation_color:
+        root.selected_color_index == 0 ? #202124 :
+        root.selected_color_index == 1 ? #2D7FF9 :
+        root.selected_color_index == 2 ? #111827 :
+        root.selected_color_index == 3 ? #FF4D4F :
+        root.selected_color_index == 4 ? #F4B400 :
+        root.selected_color_index == 5 ? #24B33A :
+        root.selected_color_index == 6 ? #2D7FF9 :
+        root.selected_color_index == 7 ? #9AA0A6 : #FFFFFF;
+    in property <bool> show_tool_options: root.show_toolbar && (root.active_tool == "rect" || root.active_tool == "circle" || root.active_tool == "arrow" || root.active_tool == "brush" || root.active_tool == "text");
+    in property <length> toolbar_width: 450px;
+    in property <length> tool_options_width: 466px;
+    in property <length> toolbar_x: min(
+        max(
+            root.toolbar_width <= root.selection_width
+                ? root.selection_right - root.toolbar_width
+                : root.selection_left,
+            8px
+        ),
+        root.width - root.toolbar_width - 8px
+    );
+    in property <length> tool_options_x: min(max(root.toolbar_x, 8px), root.width - root.tool_options_width - 8px);
     
     // 选区坐标计算
     in property <length> selection_left: min(root.start_x, root.current_x);
@@ -78,14 +186,22 @@ export component ScreenshotWindow inherits Window {
     callback save_selection(x: int, y: int, width: int, height: int);
     callback cancel();
     callback sample_magnifier_pixel(x: int, y: int);
+    callback draw_annotation(tool: string, x1: int, y1: int, x2: int, y2: int, text: string, color_index: int, stroke_width: int, text_size: int);
+    callback undo_annotation();
     
     // 定义给 Rust 后端调用的聚焦回调
     callback focus_overlay();
+    callback focus_text_editor();
 
     // 触发 focus_overlay 时强制让内部 FocusScope 获取焦点
     focus_overlay => {
         overlay_focus.focus();
     }
+
+    focus_text_editor => {
+        text_editor.focus();
+    }
+
 
     overlay_focus := FocusScope {
         width: parent.width;
@@ -154,7 +270,7 @@ export component ScreenshotWindow inherits Window {
             background: rgba(76, 139, 245, 0.3);
         }
 
-        // 5. 交互层：处理鼠标拖拽
+        // 5. 交互层：处理鼠标拖拽与标注
         touch := TouchArea {
             width: parent.width;
             height: parent.height;
@@ -164,6 +280,13 @@ export component ScreenshotWindow inherits Window {
                     root.mouse_x = self.mouse-x;
                     root.mouse_y = self.mouse-y;
                     root.sample_magnifier_pixel(self.mouse-x / 1px, self.mouse-y / 1px);
+                    if (root.is_annotating) {
+                        if (root.active_tool == "brush" || root.active_tool == "mosaic") {
+                            root.draw_annotation(root.active_tool, root.annotation_last_x / 1px, root.annotation_last_y / 1px, self.mouse-x / 1px, self.mouse-y / 1px, "", root.selected_color_index, root.selected_stroke_width, root.selected_text_size);
+                        }
+                        root.annotation_last_x = self.mouse-x;
+                        root.annotation_last_y = self.mouse-y;
+                    }
                     if (root.is_dragging) {
                         root.current_x = self.mouse-x;
                         root.current_y = self.mouse-y;
@@ -171,17 +294,39 @@ export component ScreenshotWindow inherits Window {
                 }
 
                 if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
-                    root.start_x = self.mouse-x;
-                    root.start_y = self.mouse-y;
-                    root.current_x = self.mouse-x;
-                    root.current_y = self.mouse-y;
                     root.sample_magnifier_pixel(self.mouse-x / 1px, self.mouse-y / 1px);
-                    root.is_dragging = true;
-                    root.has_selection = true;
+                    if (root.selection_ready && root.active_tool != "" && self.mouse-x >= root.selection_left && self.mouse-x <= root.selection_right && self.mouse-y >= root.selection_top && self.mouse-y <= root.selection_bottom) {
+                        if (root.active_tool == "text") {
+                            root.text_editor_x = self.mouse-x;
+                            root.text_editor_y = self.mouse-y;
+                            root.text_editor_value = "";
+                            root.text_editor_visible = true;
+                            root.focus_text_editor();
+                        } else {
+                            root.annotation_start_x = self.mouse-x;
+                            root.annotation_start_y = self.mouse-y;
+                            root.annotation_last_x = self.mouse-x;
+                            root.annotation_last_y = self.mouse-y;
+                            root.is_annotating = true;
+                        }
+                    } else {
+                        root.text_editor_visible = false;
+                        root.start_x = self.mouse-x;
+                        root.start_y = self.mouse-y;
+                        root.current_x = self.mouse-x;
+                        root.current_y = self.mouse-y;
+                        root.is_dragging = true;
+                        root.has_selection = true;
+                    }
                 }
 
                 if (event.button == PointerEventButton.left && event.kind == PointerEventKind.up) {
-                    // 核心逻辑：这里只改变拖拽状态，不销毁选区，触发 show_toolbar 显现
+                    if (root.is_annotating) {
+                        if (root.active_tool == "rect" || root.active_tool == "circle" || root.active_tool == "arrow") {
+                            root.draw_annotation(root.active_tool, root.annotation_start_x / 1px, root.annotation_start_y / 1px, self.mouse-x / 1px, self.mouse-y / 1px, "", root.selected_color_index, root.selected_stroke_width, root.selected_text_size);
+                        }
+                        root.is_annotating = false;
+                    }
                     root.is_dragging = false;
                 }
             }
@@ -196,6 +341,65 @@ export component ScreenshotWindow inherits Window {
             background: transparent;
             border-width: 2px;
             border-color: #4C8BF5;
+        }
+
+        if root.is_annotating && root.active_tool == "rect": Rectangle {
+            x: min(root.annotation_start_x, root.annotation_last_x);
+            y: min(root.annotation_start_y, root.annotation_last_y);
+            width: max(1px, max(root.annotation_start_x, root.annotation_last_x) - min(root.annotation_start_x, root.annotation_last_x));
+            height: max(1px, max(root.annotation_start_y, root.annotation_last_y) - min(root.annotation_start_y, root.annotation_last_y));
+            background: transparent;
+            border-width: root.selected_stroke_width * 1px;
+            border-color: root.annotation_color;
+        }
+
+        if root.is_annotating && root.active_tool == "circle": Path {
+            x: min(root.annotation_start_x, root.annotation_last_x);
+            y: min(root.annotation_start_y, root.annotation_last_y);
+            width: max(1px, max(root.annotation_start_x, root.annotation_last_x) - min(root.annotation_start_x, root.annotation_last_x));
+            height: max(1px, max(root.annotation_start_y, root.annotation_last_y) - min(root.annotation_start_y, root.annotation_last_y));
+            fill: transparent;
+            stroke: root.annotation_color;
+            stroke-width: root.selected_stroke_width * 1px;
+            viewbox-width: self.width / 1px;
+            viewbox-height: self.height / 1px;
+            MoveTo { x: parent.width / 1px; y: parent.height / 2 / 1px; }
+            ArcTo {
+                x: 0;
+                y: parent.height / 2 / 1px;
+                radius-x: parent.width / 2 / 1px;
+                radius-y: parent.height / 2 / 1px;
+                sweep: true;
+            }
+            ArcTo {
+                x: parent.width / 1px;
+                y: parent.height / 2 / 1px;
+                radius-x: parent.width / 2 / 1px;
+                radius-y: parent.height / 2 / 1px;
+                sweep: true;
+            }
+        }
+
+        arrow_preview := Path {
+            visible: root.is_annotating && root.active_tool == "arrow";
+            x: min(root.annotation_start_x, root.annotation_last_x);
+            y: min(root.annotation_start_y, root.annotation_last_y);
+            width: max(1px, max(root.annotation_start_x, root.annotation_last_x) - min(root.annotation_start_x, root.annotation_last_x));
+            height: max(1px, max(root.annotation_start_y, root.annotation_last_y) - min(root.annotation_start_y, root.annotation_last_y));
+            fill: transparent;
+            stroke: root.annotation_color;
+            stroke-width: root.selected_stroke_width * 1px;
+            stroke-line-cap: round;
+            viewbox-width: self.width / 1px;
+            viewbox-height: self.height / 1px;
+            MoveTo {
+                x: root.annotation_start_x <= root.annotation_last_x ? 0 : arrow_preview.width / 1px;
+                y: root.annotation_start_y <= root.annotation_last_y ? 0 : arrow_preview.height / 1px;
+            }
+            LineTo {
+                x: root.annotation_start_x <= root.annotation_last_x ? arrow_preview.width / 1px : 0;
+                y: root.annotation_start_y <= root.annotation_last_y ? arrow_preview.height / 1px : 0;
+            }
         }
 
         // 7. 尺寸提示框 (左上角动态定位)
@@ -301,6 +505,55 @@ export component ScreenshotWindow inherits Window {
             }
         }
 
+        Rectangle {
+            visible: root.text_editor_visible;
+            x: min(root.text_editor_x, root.width - self.width - 8px);
+            y: min(root.text_editor_y, root.height - self.height - 8px);
+            width: 240px;
+            height: max(root.selected_text_size * 1px + 14px, 34px);
+            background: transparent;
+            border-width: 1px;
+            border-color: root.annotation_color;
+            border-radius: 2px;
+            clip: true;
+
+            text_editor := TextInput {
+                x: 6px;
+                y: 2px;
+                width: parent.width - 12px;
+                height: parent.height - 4px;
+                text <=> root.text_editor_value;
+                font-size: root.selected_text_size * 1px;
+                color: root.annotation_color;
+                text-cursor-width: 1px;
+                selection-background-color: #CCE0FF;
+                selection-foreground-color: #202124;
+                accepted => {
+                    if (root.text_editor_value != "") {
+                        root.draw_annotation("text", root.text_editor_x / 1px + 6, root.text_editor_y / 1px + 2, root.text_editor_x / 1px, root.text_editor_y / 1px, root.text_editor_value, root.selected_color_index, root.selected_stroke_width, root.selected_text_size);
+                    }
+                    root.text_editor_visible = false;
+                    root.text_editor_value = "";
+                }
+                key-pressed(event) => {
+                    if (event.text == Key.Return) {
+                        if (root.text_editor_value != "") {
+                            root.draw_annotation("text", root.text_editor_x / 1px + 6, root.text_editor_y / 1px + 2, root.text_editor_x / 1px, root.text_editor_y / 1px, root.text_editor_value, root.selected_color_index, root.selected_stroke_width, root.selected_text_size);
+                        }
+                        root.text_editor_visible = false;
+                        root.text_editor_value = "";
+                        accept
+                    } else if (event.text == Key.Escape) {
+                        root.text_editor_visible = false;
+                        root.text_editor_value = "";
+                        accept
+                    } else {
+                        reject
+                    }
+                }
+            }
+        }
+
         // 8. 提示文字（未框选时显示）
         if !root.has_selection: Text {
             x: 0px;
@@ -313,13 +566,12 @@ export component ScreenshotWindow inherits Window {
 
         // 9. 升级版全功能工具栏 (仅在松开鼠标 show_toolbar 为真时弹出)
         if root.show_toolbar: Rectangle {
-            // 定位算法：紧贴选区右下角，且做防溢出边界处理
-            x: min(max(root.selection_left + root.selection_width - self.width, 8px), root.width - self.width - 8px);
+            x: root.toolbar_x;
             y: root.selection_bottom + 8px + self.height < root.height
                 ? root.selection_bottom + 8px
                 : root.selection_top - self.height - 8px;
             
-            width: 410px; // 拓宽容器以容纳更多按钮
+            width: root.toolbar_width; // 拓宽容器以容纳更多按钮
             height: 40px;
             background: rgba(255, 255, 255, 0.98);
             border-width: 1px;
@@ -329,6 +581,9 @@ export component ScreenshotWindow inherits Window {
             drop-shadow-color: rgba(0,0,0,0.15);
 
             HorizontalLayout {
+                y: (parent.height - self.height) / 2;
+                width: parent.width;
+                height: 32px;
                 padding-left: 8px;
                 padding-right: 8px;
                 spacing: 4px;
@@ -336,28 +591,28 @@ export component ScreenshotWindow inherits Window {
 
                 // --- 标注功能组 ---
                 ToolButton { 
-                    icon_text: "▭"; is_active: root.active_tool == "rect";
-                    clicked => { root.active_tool = root.active_tool == "rect" ? "" : "rect"; }
+                    icon: @image-url("../assets/icons/square-32.png"); is_active: root.active_tool == "rect";
+                    clicked => { root.active_tool = root.active_tool == "rect" ? "" : "rect"; root.text_editor_visible = false; }
                 }
                 ToolButton { 
-                    icon_text: "○"; is_active: root.active_tool == "circle";
-                    clicked => { root.active_tool = root.active_tool == "circle" ? "" : "circle"; }
+                    icon: @image-url("../assets/icons/circle-32.png"); is_active: root.active_tool == "circle";
+                    clicked => { root.active_tool = root.active_tool == "circle" ? "" : "circle"; root.text_editor_visible = false; }
                 }
                 ToolButton { 
-                    icon_text: "↗"; is_active: root.active_tool == "arrow";
-                    clicked => { root.active_tool = root.active_tool == "arrow" ? "" : "arrow"; }
+                    icon: @image-url("../assets/icons/right-upper-arrow-32.png"); is_active: root.active_tool == "arrow";
+                    clicked => { root.active_tool = root.active_tool == "arrow" ? "" : "arrow"; root.text_editor_visible = false; }
                 }
                 ToolButton { 
-                    icon_text: "✎"; is_active: root.active_tool == "brush";
-                    clicked => { root.active_tool = root.active_tool == "brush" ? "" : "brush"; }
+                    icon: @image-url("../assets/icons/brush-32.png"); is_active: root.active_tool == "brush";
+                    clicked => { root.active_tool = root.active_tool == "brush" ? "" : "brush"; root.text_editor_visible = false; }
                 }
                 ToolButton { 
-                    icon_text: "Ｔ"; is_active: root.active_tool == "text";
+                    icon: @image-url("../assets/icons/text-32.png"); is_active: root.active_tool == "text";
                     clicked => { root.active_tool = root.active_tool == "text" ? "" : "text"; }
                 }
                 ToolButton { 
-                    icon_text: "░"; is_active: root.active_tool == "mosaic";
-                    clicked => { root.active_tool = root.active_tool == "mosaic" ? "" : "mosaic"; }
+                    icon: @image-url("../assets/icons/mosaic-32.png"); is_active: root.active_tool == "mosaic";
+                    clicked => { root.active_tool = root.active_tool == "mosaic" ? "" : "mosaic"; root.text_editor_visible = false; }
                 }
 
                 // 分隔线
@@ -367,23 +622,110 @@ export component ScreenshotWindow inherits Window {
                     background: #E8EAED;
                 }
 
+                ToolButton {
+                    icon: @image-url("../assets/icons/undo-32.png");
+                    clicked => { root.undo_annotation(); }
+                }
+
                 // --- 基础控制组 ---
                 ToolButton {
-                    icon_text: "✔"; text_color: #1A73E8; hover_bg: #E8F0FE;
-                    clicked => {
-                        root.copy_selection(root.selection_left / 1px, root.selection_top / 1px, root.selection_width / 1px, root.selection_height / 1px);
-                    }
-                }
-                ToolButton {
-                    icon_text: "💾";
+                    icon: @image-url("../assets/icons/save-32.png");
                     clicked => {
                         root.save_selection(root.selection_left / 1px, root.selection_top / 1px, root.selection_width / 1px, root.selection_height / 1px);
                     }
                 }
                 ToolButton {
-                    icon_text: "✘"; text_color: #D93025; hover_bg: #FCE8E6;
+                    icon: @image-url("../assets/icons/cancel-32.png"); hover_bg: #FCE8E6;
                     clicked => { root.cancel(); }
                 }
+                ToolButton {
+                    icon: @image-url("../assets/icons/done-32.png"); hover_bg: #E8F0FE;
+                    clicked => {
+                        root.copy_selection(root.selection_left / 1px, root.selection_top / 1px, root.selection_width / 1px, root.selection_height / 1px);
+                    }
+                }
+            }
+        }
+
+        if root.show_tool_options: Rectangle {
+            x: root.tool_options_x;
+            y: root.selection_bottom + 62px + self.height < root.height
+                ? root.selection_bottom + 62px
+                : root.selection_top - self.height - 56px;
+            width: root.tool_options_width;
+            height: 54px;
+            background: white;
+            border-radius: 8px;
+            drop-shadow-blur: 10px;
+            drop-shadow-color: rgba(0,0,0,0.16);
+
+            Path {
+                x: 18px;
+                y: -9px;
+                width: 18px;
+                height: 10px;
+                fill: white;
+                viewbox-width: 18;
+                viewbox-height: 10;
+                MoveTo { x: 0; y: 10; }
+                LineTo { x: 9; y: 0; }
+                LineTo { x: 18; y: 10; }
+                Close {}
+            }
+
+            HorizontalLayout {
+                padding-left: 18px;
+                padding-right: 14px;
+                spacing: 12px;
+                alignment: center;
+
+                if root.active_tool != "text": StrokeOption {
+                    stroke_value: 2;
+                    is_active: root.selected_stroke_width == 2;
+                    clicked => { root.selected_stroke_width = 2; }
+                }
+                if root.active_tool != "text": StrokeOption {
+                    stroke_value: 4;
+                    is_active: root.selected_stroke_width == 4;
+                    clicked => { root.selected_stroke_width = 4; }
+                }
+                if root.active_tool != "text": StrokeOption {
+                    stroke_value: 6;
+                    is_active: root.selected_stroke_width == 6;
+                    clicked => { root.selected_stroke_width = 6; }
+                }
+
+                if root.active_tool == "text": TextSizeOption {
+                    size_value: 18;
+                    is_active: root.selected_text_size == 18;
+                    clicked => { root.selected_text_size = 18; root.focus_text_editor(); }
+                }
+                if root.active_tool == "text": TextSizeOption {
+                    size_value: 24;
+                    is_active: root.selected_text_size == 24;
+                    clicked => { root.selected_text_size = 24; root.focus_text_editor(); }
+                }
+                if root.active_tool == "text": TextSizeOption {
+                    size_value: 32;
+                    is_active: root.selected_text_size == 32;
+                    clicked => { root.selected_text_size = 32; root.focus_text_editor(); }
+                }
+
+                Rectangle {
+                    width: 1px;
+                    height: 22px;
+                    background: #E8EAED;
+                }
+
+                ColorSwatch { swatch_color: #202124; is_active: root.selected_color_index == 0; clicked => { root.selected_color_index = 0; root.focus_text_editor(); } }
+                ColorSwatch { swatch_color: #2D7FF9; is_active: root.selected_color_index == 1; clicked => { root.selected_color_index = 1; root.focus_text_editor(); } }
+                ColorSwatch { swatch_color: #111827; is_active: root.selected_color_index == 2; clicked => { root.selected_color_index = 2; root.focus_text_editor(); } }
+                ColorSwatch { swatch_color: #FF4D4F; is_active: root.selected_color_index == 3; clicked => { root.selected_color_index = 3; root.focus_text_editor(); } }
+                ColorSwatch { swatch_color: #F4B400; is_active: root.selected_color_index == 4; clicked => { root.selected_color_index = 4; root.focus_text_editor(); } }
+                ColorSwatch { swatch_color: #24B33A; is_active: root.selected_color_index == 5; clicked => { root.selected_color_index = 5; root.focus_text_editor(); } }
+                ColorSwatch { swatch_color: #2D7FF9; is_active: root.selected_color_index == 6; clicked => { root.selected_color_index = 6; root.focus_text_editor(); } }
+                ColorSwatch { swatch_color: #9AA0A6; is_active: root.selected_color_index == 7; clicked => { root.selected_color_index = 7; root.focus_text_editor(); } }
+                ColorSwatch { swatch_color: #FFFFFF; is_active: root.selected_color_index == 8; clicked => { root.selected_color_index = 8; root.focus_text_editor(); } }
             }
         }
     }
