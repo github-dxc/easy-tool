@@ -1,0 +1,28 @@
+
+// 升级版工具按钮：支持激活状态（高亮）
+export component ToolButton inherits Rectangle {
+    in property <image> icon;
+    in property <bool> is_active: false;
+    in property <brush> hover_bg: #F1F3F4;
+    in property <brush> active_bg: #E8F0FE;
+    
+    callback clicked;
+
+    width: 32px;
+    height: 32px;
+    border-radius: 4px;
+    background: root.is_active ? root.active_bg : (touch.has-hover ? root.hover_bg : transparent);
+    
+    touch := TouchArea {
+        clicked => { root.clicked(); }
+    }
+
+
+    Image {
+        source: root.icon;
+        height: 16px;
+        width: 16px;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}

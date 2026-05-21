@@ -1,0 +1,28 @@
+
+export component ColorSwatch inherits Rectangle {
+    in property <brush> swatch_color: #FF4D4F;
+    in property <bool> is_active: false;
+    callback clicked;
+
+    width: 24px;
+    height: 24px;
+    border-radius: 12px;
+    background: transparent;
+    border-width: root.is_active ? 2px : 1px;
+    border-color: root.is_active ? #1A73E8 : #DADCE0;
+
+    Rectangle {
+        x: 4px;
+        y: 4px;
+        width: 16px;
+        height: 16px;
+        border-radius: 8px;
+        background: root.swatch_color;
+        border-width: 1px;
+        border-color: #DADCE0;
+    }
+
+    touch := TouchArea {
+        clicked => { root.clicked(); }
+    }
+}

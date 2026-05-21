@@ -1,107 +1,8 @@
 import "../assets/font/AlibabaPuHuiTi-3-55-Regular.ttf";
-
-// 升级版工具按钮：支持激活状态（高亮）
-component ToolButton inherits Rectangle {
-    in property <image> icon;
-    in property <bool> is_active: false;
-    in property <brush> hover_bg: #F1F3F4;
-    in property <brush> active_bg: #E8F0FE;
-    
-    callback clicked;
-
-    width: 32px;
-    height: 32px;
-    border-radius: 4px;
-    background: root.is_active ? root.active_bg : (touch.has-hover ? root.hover_bg : transparent);
-    
-    touch := TouchArea {
-        clicked => { root.clicked(); }
-    }
-
-
-    Image {
-        source: root.icon;
-        height: 16px;
-        width: 16px;
-        horizontal-alignment: center;
-        vertical-alignment: center;
-    }
-}
-
-component ColorSwatch inherits Rectangle {
-    in property <brush> swatch_color: #FF4D4F;
-    in property <bool> is_active: false;
-    callback clicked;
-
-    width: 24px;
-    height: 24px;
-    border-radius: 12px;
-    background: transparent;
-    border-width: root.is_active ? 2px : 1px;
-    border-color: root.is_active ? #1A73E8 : #DADCE0;
-
-    Rectangle {
-        x: 4px;
-        y: 4px;
-        width: 16px;
-        height: 16px;
-        border-radius: 8px;
-        background: root.swatch_color;
-        border-width: 1px;
-        border-color: #DADCE0;
-    }
-
-    touch := TouchArea {
-        clicked => { root.clicked(); }
-    }
-}
-
-component StrokeOption inherits Rectangle {
-    in property <int> stroke_value: 3;
-    in property <bool> is_active: false;
-    callback clicked;
-
-    width: 34px;
-    height: 28px;
-    border-radius: 4px;
-    background: root.is_active ? #E8F0FE : (touch.has-hover ? #F1F3F4 : transparent);
-
-    Rectangle {
-        width: 20px;
-        height: root.stroke_value * 1px;
-        border-radius: root.stroke_value * 1px / 2;
-        background: #202124;
-        x: (parent.width - self.width) / 2;
-        y: (parent.height - self.height) / 2;
-    }
-
-    touch := TouchArea {
-        clicked => { root.clicked(); }
-    }
-}
-
-component TextSizeOption inherits Rectangle {
-    in property <int> size_value: 24;
-    in property <bool> is_active: false;
-    callback clicked;
-
-    width: 34px;
-    height: 28px;
-    border-radius: 4px;
-    background: root.is_active ? #E8F0FE : (touch.has-hover ? #F1F3F4 : transparent);
-
-    Text {
-        text: "T";
-        font-size: root.size_value * 1px;
-        color: #202124;
-        horizontal-alignment: center;
-        vertical-alignment: center;
-    }
-
-    touch := TouchArea {
-        clicked => { root.clicked(); }
-    }
-}
+import { ToolButton } from "./components/ToolButton.slint";
+import { ColorSwatch } from "./components/ColorSwatch.slint";
+import { StrokeOption } from "./components/StrokeOption.slint";
+import { TextSizeOption } from "./components/TextSizeOption.slint";
 
 export component ScreenshotWindow inherits Window {
     no-frame: true;
@@ -134,15 +35,13 @@ export component ScreenshotWindow inherits Window {
     in property <brush> annotation_color:
         root.selected_color_index == 0 ? #202124 :
         root.selected_color_index == 1 ? #2D7FF9 :
-        root.selected_color_index == 2 ? #111827 :
-        root.selected_color_index == 3 ? #FF4D4F :
-        root.selected_color_index == 4 ? #F4B400 :
-        root.selected_color_index == 5 ? #24B33A :
-        root.selected_color_index == 6 ? #2D7FF9 :
-        root.selected_color_index == 7 ? #9AA0A6 : #FFFFFF;
+        root.selected_color_index == 2 ? #FF4D4F :
+        root.selected_color_index == 3 ? #F4B400 :
+        root.selected_color_index == 4 ? #24B33A :
+        root.selected_color_index == 5 ? #9AA0A6 : #FFFFFF;
     in property <bool> show_tool_options: root.show_toolbar && (root.active_tool == "rect" || root.active_tool == "circle" || root.active_tool == "arrow" || root.active_tool == "brush" || root.active_tool == "text");
     in property <length> toolbar_width: 450px;
-    in property <length> tool_options_width: 466px;
+    in property <length> tool_options_width: 450px;
     in property <length> toolbar_x: min(
         max(
             root.toolbar_width <= root.selection_width
@@ -416,7 +315,7 @@ export component ScreenshotWindow inherits Window {
                 color: white; font-size: 11px; font-weight: 700;
                 horizontal-alignment: center; vertical-alignment: center;
 
-                // ✨ 核心修改：动态计算 DPI 缩放比，并乘回给显示尺寸
+                // 动态计算 DPI 缩放比，并乘回给显示尺寸
                 property <float> scale: root.screenshot.width / (root.width / 1px);
                 
                 text: Math.round((root.selection_width / 1px) * scale) + " x " + Math.round((root.selection_height / 1px) * scale);
@@ -653,7 +552,7 @@ export component ScreenshotWindow inherits Window {
                 ? root.selection_bottom + 62px
                 : root.selection_top - self.height - 56px;
             width: root.tool_options_width;
-            height: 54px;
+            height: 44px;
             background: white;
             border-radius: 8px;
             drop-shadow-blur: 10px;
@@ -676,6 +575,7 @@ export component ScreenshotWindow inherits Window {
             HorizontalLayout {
                 padding-left: 18px;
                 padding-right: 14px;
+                y: 10px;
                 spacing: 12px;
                 alignment: center;
 
@@ -719,13 +619,11 @@ export component ScreenshotWindow inherits Window {
 
                 ColorSwatch { swatch_color: #202124; is_active: root.selected_color_index == 0; clicked => { root.selected_color_index = 0; root.focus_text_editor(); } }
                 ColorSwatch { swatch_color: #2D7FF9; is_active: root.selected_color_index == 1; clicked => { root.selected_color_index = 1; root.focus_text_editor(); } }
-                ColorSwatch { swatch_color: #111827; is_active: root.selected_color_index == 2; clicked => { root.selected_color_index = 2; root.focus_text_editor(); } }
-                ColorSwatch { swatch_color: #FF4D4F; is_active: root.selected_color_index == 3; clicked => { root.selected_color_index = 3; root.focus_text_editor(); } }
-                ColorSwatch { swatch_color: #F4B400; is_active: root.selected_color_index == 4; clicked => { root.selected_color_index = 4; root.focus_text_editor(); } }
-                ColorSwatch { swatch_color: #24B33A; is_active: root.selected_color_index == 5; clicked => { root.selected_color_index = 5; root.focus_text_editor(); } }
-                ColorSwatch { swatch_color: #2D7FF9; is_active: root.selected_color_index == 6; clicked => { root.selected_color_index = 6; root.focus_text_editor(); } }
-                ColorSwatch { swatch_color: #9AA0A6; is_active: root.selected_color_index == 7; clicked => { root.selected_color_index = 7; root.focus_text_editor(); } }
-                ColorSwatch { swatch_color: #FFFFFF; is_active: root.selected_color_index == 8; clicked => { root.selected_color_index = 8; root.focus_text_editor(); } }
+                ColorSwatch { swatch_color: #FF4D4F; is_active: root.selected_color_index == 2; clicked => { root.selected_color_index = 2; root.focus_text_editor(); } }
+                ColorSwatch { swatch_color: #F4B400; is_active: root.selected_color_index == 3; clicked => { root.selected_color_index = 3; root.focus_text_editor(); } }
+                ColorSwatch { swatch_color: #24B33A; is_active: root.selected_color_index == 4; clicked => { root.selected_color_index = 4; root.focus_text_editor(); } }
+                ColorSwatch { swatch_color: #9AA0A6; is_active: root.selected_color_index == 5; clicked => { root.selected_color_index = 5; root.focus_text_editor(); } }
+                ColorSwatch { swatch_color: #FFFFFF; is_active: root.selected_color_index == 6; clicked => { root.selected_color_index = 6; root.focus_text_editor(); } }
             }
         }
     }
