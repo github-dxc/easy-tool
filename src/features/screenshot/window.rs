@@ -79,6 +79,13 @@ pub fn init_screenshot_window() -> ScreenshotWindow {
         }
     });
 
+    let weak = window.as_weak();
+    window.on_sample_magnifier_pixel(move |x, y| {
+        if let Some(ui) = weak.upgrade() {
+            update_magnifier_pixel(&ui, x, y);
+        }
+    });
+
     window
 }
 
@@ -103,6 +110,9 @@ pub fn show_screenshot_window(window: &ScreenshotWindow) {
             window.set_screenshot(preview);
             window.set_has_selection(false);
             window.set_is_dragging(false);
+            window.set_magnifier_center_text("Center: 0, 0".into());
+            window.set_magnifier_hex_text("HEX: #000000".into());
+            window.set_magnifier_rgb_text("RGB: 0, 0, 0".into());
             set_window_position(window, bounds.x as f64, bounds.y as f64);
 
             let _ = window.show();
@@ -140,6 +150,27 @@ fn cropped_selection(x: i32, y: i32, width: i32, height: i32) -> Result<RgbaImag
             scale_logical_size(height, session.scale_factor).min(session.bounds.height - y);
         Ok(image::imageops::crop_imm(&session.image, x, y, width, height).to_image())
     })
+}
+
+fn update_magnifier_pixel(window: &ScreenshotWindow, x: i32, y: i32) {
+    SCREENSHOT_SESSION.with(|store| {
+        let store = store.borrow();
+        let Some(session) = store.as_ref() else {
+            return;
+        };
+
+        let pixel_x = scale_logical_coordinate(x, session.scale_factor)
+            .clamp(0, session.bounds.width.saturating_sub(1) as i32) as u32;
+        let pixel_y = scale_logical_coordinate(y, session.scale_factor)
+            .clamp(0, session.bounds.height.saturating_sub(1) as i32) as u32;
+        let [r, g, b, _] = session.image.get_pixel(pixel_x, pixel_y).0;
+
+        window.set_magnifier_center_text(
+            format!("Center: {pixel_x}, {pixel_y}").into(),
+        );
+        window.set_magnifier_hex_text(format!("HEX: #{r:02X}{g:02X}{b:02X}").into());
+        window.set_magnifier_rgb_text(format!("RGB: {r}, {g}, {b}").into());
+    });
 }
 
 fn scale_logical_coordinate(value: i32, scale_factor: f32) -> i32 {

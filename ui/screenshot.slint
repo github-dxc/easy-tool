@@ -64,10 +64,20 @@ export component ScreenshotWindow inherits Window {
     in-out property <string> active_tool: "";
 
     in property <brush> dim_overlay: rgba(0, 0, 0, 0.35);
+    in property <float> screenshot_scale: root.screenshot.width / (root.width / 1px);
+    in property <int> magnifier_source_size: 48;
+    in property <length> magnifier_size: 144px;
+    in property <length> magnifier_gap: 18px;
+    in property <int> magnifier_source_x: max(0, min(root.screenshot.width - root.magnifier_source_size, Math.round((root.mouse_x / 1px) * root.screenshot_scale - root.magnifier_source_size / 2)));
+    in property <int> magnifier_source_y: max(0, min(root.screenshot.height - root.magnifier_source_size, Math.round((root.mouse_y / 1px) * root.screenshot_scale - root.magnifier_source_size / 2)));
+    in-out property <string> magnifier_center_text: "Center: 0, 0";
+    in-out property <string> magnifier_hex_text: "HEX: #000000";
+    in-out property <string> magnifier_rgb_text: "RGB: 0, 0, 0";
 
     callback copy_selection(x: int, y: int, width: int, height: int);
     callback save_selection(x: int, y: int, width: int, height: int);
     callback cancel();
+    callback sample_magnifier_pixel(x: int, y: int);
     
     // 定义给 Rust 后端调用的聚焦回调
     callback focus_overlay();
@@ -153,6 +163,7 @@ export component ScreenshotWindow inherits Window {
                 if (event.kind == PointerEventKind.move) {
                     root.mouse_x = self.mouse-x;
                     root.mouse_y = self.mouse-y;
+                    root.sample_magnifier_pixel(self.mouse-x / 1px, self.mouse-y / 1px);
                     if (root.is_dragging) {
                         root.current_x = self.mouse-x;
                         root.current_y = self.mouse-y;
@@ -164,6 +175,7 @@ export component ScreenshotWindow inherits Window {
                     root.start_y = self.mouse-y;
                     root.current_x = self.mouse-x;
                     root.current_y = self.mouse-y;
+                    root.sample_magnifier_pixel(self.mouse-x / 1px, self.mouse-y / 1px);
                     root.is_dragging = true;
                     root.has_selection = true;
                 }
@@ -204,6 +216,88 @@ export component ScreenshotWindow inherits Window {
                 property <float> scale: root.screenshot.width / (root.width / 1px);
                 
                 text: Math.round((root.selection_width / 1px) * scale) + " x " + Math.round((root.selection_height / 1px) * scale);
+            }
+        }
+
+        // Magnifier: follows the pointer while selecting and hides once the toolbar appears.
+        if !root.show_toolbar: Rectangle {
+            width: root.magnifier_size;
+            height: root.magnifier_size + 62px;
+            x: min(max(root.mouse_x + root.magnifier_gap + self.width < root.width ? root.mouse_x + root.magnifier_gap : root.mouse_x - self.width - root.magnifier_gap, 8px), root.width - self.width - 8px);
+            y: min(max(root.mouse_y + root.magnifier_gap + self.height < root.height ? root.mouse_y + root.magnifier_gap : root.mouse_y - self.height - root.magnifier_gap, 8px), root.height - self.height - 8px);
+            background: rgba(32, 33, 36, 0.96);
+            border-width: 1px;
+            border-color: rgba(255, 255, 255, 0.72);
+            border-radius: 4px;
+            clip: true;
+            drop-shadow-blur: 12px;
+            drop-shadow-color: rgba(0,0,0,0.35);
+
+            Rectangle {
+                x: 4px;
+                y: 4px;
+                width: parent.width - 8px;
+                height: parent.width - 8px;
+                clip: true;
+                background: black;
+
+                Image {
+                    width: parent.width;
+                    height: parent.height;
+                    source: root.screenshot;
+                    image-fit: fill;
+                    image-rendering: pixelated;
+                    source-clip-x: root.magnifier_source_x;
+                    source-clip-y: root.magnifier_source_y;
+                    source-clip-width: root.magnifier_source_size;
+                    source-clip-height: root.magnifier_source_size;
+                }
+
+                Rectangle { x: parent.width / 2 - 1px; y: 0px; width: 1px; height: parent.height; background: rgba(255, 255, 255, 0.65); }
+                Rectangle { x: 0px; y: parent.height / 2 - 1px; width: parent.width; height: 1px; background: rgba(255, 255, 255, 0.65); }
+                Rectangle { x: parent.width * 1 / 4; y: 0px; width: 1px; height: parent.height; background: rgba(255, 255, 255, 0.16); }
+                Rectangle { x: parent.width * 3 / 4; y: 0px; width: 1px; height: parent.height; background: rgba(255, 255, 255, 0.16); }
+                Rectangle { x: 0px; y: parent.height * 1 / 4; width: parent.width; height: 1px; background: rgba(255, 255, 255, 0.16); }
+                Rectangle { x: 0px; y: parent.height * 3 / 4; width: parent.width; height: 1px; background: rgba(255, 255, 255, 0.16); }
+            }
+
+            Text {
+                x: 8px;
+                y: parent.width + 1px;
+                width: parent.width - 16px;
+                height: 18px;
+                text: root.magnifier_center_text;
+                color: white;
+                font-size: 10px;
+                font-weight: 700;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+
+            Text {
+                x: 8px;
+                y: parent.width + 18px;
+                width: parent.width - 16px;
+                height: 20px;
+                text: root.magnifier_hex_text;
+                color: white;
+                font-size: 10px;
+                font-weight: 700;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+            
+            Text {
+                x: 8px;
+                y: parent.width + 36px;
+                width: parent.width - 16px;
+                height: 20px;
+                text: root.magnifier_rgb_text;
+                color: white;
+                font-size: 10px;
+                font-weight: 700;
+                horizontal-alignment: center;
+                vertical-alignment: center;
             }
         }
 
