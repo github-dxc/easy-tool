@@ -2,6 +2,7 @@
 
 use std::cell::RefCell;
 use std::path::PathBuf;
+use std::rc::Rc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use arboard::{Clipboard, ImageData};
@@ -12,9 +13,9 @@ use imageproc::drawing::{
 };
 use imageproc::rect::Rect;
 use rusttype::{Font, Scale};
-use slint::{ComponentHandle, Image, Rgba8Pixel, SharedPixelBuffer};
+use slint::{ComponentHandle, Image, ModelRc, Rgba8Pixel, SharedPixelBuffer, VecModel};
 
-use crate::ScreenshotWindow;
+use crate::{BrushSegment, ScreenshotWindow};
 use crate::platform::window::{activate_slint_window, hide_taskbar_icon_for, set_window_position};
 
 #[derive(Clone)]
@@ -23,6 +24,19 @@ struct ScreenshotSession {
     image: RgbaImage,
     scale_factor: f32,
     undo_stack: Vec<RgbaImage>,
+    continuous_annotation_active: bool,
+    brush_segments: Vec<PhysicalBrushSegment>,
+    brush_segment_model: Rc<VecModel<BrushSegment>>,
+}
+
+#[derive(Clone, Copy)]
+struct PhysicalBrushSegment {
+    x1: i32,
+    y1: i32,
+    x2: i32,
+    y2: i32,
+    color_index: i32,
+    stroke_width: i32,
 }
 
 #[derive(Clone, Copy)]
@@ -114,9 +128,41 @@ pub fn init_screenshot_window() -> ScreenshotWindow {
     });
 
     let weak = window.as_weak();
+    window.on_preview_brush(move |x1, y1, x2, y2, color_index, stroke_width| {
+        if let Some(ui) = weak.upgrade() {
+            if let Err(err) = preview_brush(&ui, x1, y1, x2, y2, color_index, stroke_width) {
+                log::error!("preview screenshot brush failed: {err}");
+            }
+        }
+    });
+
+    let weak = window.as_weak();
+    window.on_preview_text(move |x, y, text, color_index, text_size| {
+        if let Some(ui) = weak.upgrade() {
+            if let Err(err) = preview_text(&ui, x, y, text.as_str(), color_index, text_size) {
+                log::error!("preview screenshot text failed: {err}");
+            }
+        }
+    });
+
+    let weak = window.as_weak();
+    window.on_clear_text_preview(move || {
+        if let Some(ui) = weak.upgrade() {
+            ui.set_has_text_preview(false);
+        }
+    });
+
+    let weak = window.as_weak();
     window.on_undo_annotation(move || {
         if let Some(ui) = weak.upgrade() {
             undo_annotation(&ui);
+        }
+    });
+
+    let weak = window.as_weak();
+    window.on_finish_annotation(move || {
+        if let Some(ui) = weak.upgrade() {
+            finish_annotation(&ui);
         }
     });
 
@@ -148,6 +194,9 @@ pub fn show_screenshot_window(window: &ScreenshotWindow) {
             window.set_active_tool("".into());
             window.set_text_editor_visible(false);
             window.set_text_editor_value("".into());
+            window.set_has_text_preview(false);
+            let brush_segment_model = Rc::new(VecModel::from(Vec::<BrushSegment>::new()));
+            window.set_brush_segments(ModelRc::from(brush_segment_model.clone()));
             window.set_magnifier_center_text("Center: 0, 0".into());
             window.set_magnifier_hex_text("HEX: #000000".into());
             window.set_magnifier_rgb_text("RGB: 0, 0, 0".into());
@@ -161,6 +210,9 @@ pub fn show_screenshot_window(window: &ScreenshotWindow) {
                 *store.borrow_mut() = Some(ScreenshotSession {
                     scale_factor,
                     undo_stack: Vec::new(),
+                    continuous_annotation_active: false,
+                    brush_segments: Vec::new(),
+                    brush_segment_model,
                     ..session
                 });
             });
@@ -230,9 +282,12 @@ fn draw_annotation(
             .as_mut()
             .ok_or_else(|| "missing screenshot session".to_string())?;
 
-        session.undo_stack.push(session.image.clone());
-        if session.undo_stack.len() > 20 {
-            session.undo_stack.remove(0);
+        let is_continuous_annotation = matches!(tool, "brush" | "mosaic");
+        if !is_continuous_annotation || !session.continuous_annotation_active {
+            push_undo_snapshot(session);
+        }
+        if is_continuous_annotation {
+            session.continuous_annotation_active = true;
         }
 
         let x1 = scale_logical_coordinate(x1, session.scale_factor);
@@ -240,8 +295,10 @@ fn draw_annotation(
         let x2 = scale_logical_coordinate(x2, session.scale_factor);
         let y2 = scale_logical_coordinate(y2, session.scale_factor);
         let color = annotation_color(color_index);
-        let stroke_width = stroke_width.clamp(2, 12);
-        let text_size = text_size.clamp(12, 64);
+        let stroke_width =
+            scale_logical_coordinate(stroke_width.clamp(2, 12), session.scale_factor).max(1);
+        let text_size =
+            scale_logical_coordinate(text_size.clamp(12, 64), session.scale_factor).max(1);
 
         match tool {
             "rect" => draw_rect_annotation(&mut session.image, x1, y1, x2, y2, color, stroke_width),
@@ -272,12 +329,125 @@ fn annotation_color(index: i32) -> Rgba<u8> {
     }
 }
 
+fn preview_brush(
+    _window: &ScreenshotWindow,
+    x1: i32,
+    y1: i32,
+    x2: i32,
+    y2: i32,
+    color_index: i32,
+    stroke_width: i32,
+) -> Result<(), String> {
+    SCREENSHOT_SESSION.with(|store| {
+        let mut store = store.borrow_mut();
+        let session = store
+            .as_mut()
+            .ok_or_else(|| "missing screenshot session".to_string())?;
+
+        let x1 = scale_logical_coordinate(x1, session.scale_factor);
+        let y1 = scale_logical_coordinate(y1, session.scale_factor);
+        let x2 = scale_logical_coordinate(x2, session.scale_factor);
+        let y2 = scale_logical_coordinate(y2, session.scale_factor);
+        let stroke_width =
+            scale_logical_coordinate(stroke_width.clamp(2, 12), session.scale_factor).max(1);
+
+        session.brush_segments.push(PhysicalBrushSegment {
+            x1,
+            y1,
+            x2,
+            y2,
+            color_index,
+            stroke_width,
+        });
+        session.brush_segment_model.push(BrushSegment {
+            x1: (x1 as f32) / session.scale_factor,
+            y1: (y1 as f32) / session.scale_factor,
+            x2: (x2 as f32) / session.scale_factor,
+            y2: (y2 as f32) / session.scale_factor,
+            color_index,
+            stroke_width: (stroke_width as f32) / session.scale_factor,
+        });
+        Ok(())
+    })
+}
+
+fn preview_text(
+    window: &ScreenshotWindow,
+    x: i32,
+    y: i32,
+    text: &str,
+    color_index: i32,
+    text_size: i32,
+) -> Result<(), String> {
+    if text.trim().is_empty() {
+        window.set_has_text_preview(false);
+        return Ok(());
+    }
+
+    SCREENSHOT_SESSION.with(|store| {
+        let store = store.borrow();
+        let session = store
+            .as_ref()
+            .ok_or_else(|| "missing screenshot session".to_string())?;
+
+        let x = scale_logical_coordinate(x, session.scale_factor);
+        let y = scale_logical_coordinate(y, session.scale_factor);
+        let color = annotation_color(color_index);
+        let text_size =
+            scale_logical_coordinate(text_size.clamp(12, 64), session.scale_factor).max(1);
+
+        let mut preview =
+            RgbaImage::from_pixel(session.bounds.width, session.bounds.height, Rgba([0, 0, 0, 0]));
+        draw_text_annotation(&mut preview, x, y, text, color, text_size);
+        window.set_text_preview(image_from_rgba(&preview));
+        window.set_has_text_preview(true);
+        Ok(())
+    })
+}
+
+fn push_undo_snapshot(session: &mut ScreenshotSession) {
+    session.undo_stack.push(session.image.clone());
+    if session.undo_stack.len() > 20 {
+        session.undo_stack.remove(0);
+    }
+}
+
+fn finish_annotation(window: &ScreenshotWindow) {
+    SCREENSHOT_SESSION.with(|store| {
+        let mut store = store.borrow_mut();
+        let Some(session) = store.as_mut() else {
+            return;
+        };
+        if !session.brush_segments.is_empty() {
+            push_undo_snapshot(session);
+            for segment in session.brush_segments.drain(..) {
+                let color = annotation_color(segment.color_index);
+                draw_thick_line(
+                    &mut session.image,
+                    segment.x1,
+                    segment.y1,
+                    segment.x2,
+                    segment.y2,
+                    color,
+                    segment.stroke_width,
+                );
+            }
+            session.brush_segment_model.set_vec(Vec::new());
+            window.set_screenshot(image_from_rgba(&session.image));
+        }
+        session.continuous_annotation_active = false;
+    });
+}
+
 fn undo_annotation(window: &ScreenshotWindow) {
     SCREENSHOT_SESSION.with(|store| {
         let mut store = store.borrow_mut();
         let Some(session) = store.as_mut() else {
             return;
         };
+        session.continuous_annotation_active = false;
+        session.brush_segments.clear();
+        session.brush_segment_model.set_vec(Vec::new());
         let Some(previous) = session.undo_stack.pop() else {
             return;
         };
@@ -300,7 +470,10 @@ fn draw_rect_annotation(
     let width = (x1 - x2).unsigned_abs().max(1);
     let height = (y1 - y2).unsigned_abs().max(1);
     for offset in 0..stroke_width {
-        let rect = Rect::at(left - offset, top - offset).of_size(width + offset as u32 * 2, height + offset as u32 * 2);
+        let inset = offset as u32;
+        let rect_width = width.saturating_sub(inset * 2).max(1);
+        let rect_height = height.saturating_sub(inset * 2).max(1);
+        let rect = Rect::at(left + offset, top + offset).of_size(rect_width, rect_height);
         draw_hollow_rect_mut(image, rect, color);
     }
 }
@@ -314,12 +487,18 @@ fn draw_ellipse_annotation(
     color: Rgba<u8>,
     stroke_width: i32,
 ) {
-    let center_x = (x1 + x2) / 2;
-    let center_y = (y1 + y2) / 2;
-    let radius_x = ((x1 - x2).abs() / 2).max(1);
-    let radius_y = ((y1 - y2).abs() / 2).max(1);
+    let left = x1.min(x2);
+    let top = y1.min(y2);
+    let width = (x1 - x2).abs().max(1);
+    let height = (y1 - y2).abs().max(1);
+    let center_x = left + width / 2;
+    let center_y = top + height / 2;
+    let radius_x = (width - 1) / 2;
+    let radius_y = (height - 1) / 2;
     for offset in 0..stroke_width {
-        draw_hollow_ellipse_mut(image, (center_x, center_y), radius_x + offset, radius_y + offset, color);
+        let radius_x = (radius_x - offset).max(0);
+        let radius_y = (radius_y - offset).max(0);
+        draw_hollow_ellipse_mut(image, (center_x, center_y), radius_x, radius_y, color);
     }
 }
 
@@ -353,9 +532,10 @@ fn draw_thick_line(
     color: Rgba<u8>,
     thickness: i32,
 ) {
-    for dx in -thickness..=thickness {
-        for dy in -thickness..=thickness {
-            if dx * dx + dy * dy <= thickness * thickness {
+    let radius = (thickness / 2).max(1);
+    for dx in -radius..=radius {
+        for dy in -radius..=radius {
+            if dx * dx + dy * dy <= radius * radius {
                 draw_line_segment_mut(
                     image,
                     ((x1 + dx) as f32, (y1 + dy) as f32),
@@ -373,20 +553,50 @@ fn draw_mosaic_annotation(image: &mut RgbaImage, x1: i32, y1: i32, x2: i32, y2: 
     let top = (y1.min(y2) - radius).max(0) as u32;
     let right = (x1.max(x2) + radius).clamp(0, image.width().saturating_sub(1) as i32) as u32;
     let bottom = (y1.max(y2) + radius).clamp(0, image.height().saturating_sub(1) as i32) as u32;
-    let block = 10;
+    let block = 12;
 
     let mut by = top;
     while by <= bottom {
         let mut bx = left;
         while bx <= right {
-            let sample = *image.get_pixel(bx, by);
             let rect_width = (block as u32).min(right - bx + 1);
             let rect_height = (block as u32).min(bottom - by + 1);
-            draw_filled_rect_mut(image, Rect::at(bx as i32, by as i32).of_size(rect_width, rect_height), sample);
+            let color = average_block_color(image, bx, by, rect_width, rect_height);
+            draw_filled_rect_mut(image, Rect::at(bx as i32, by as i32).of_size(rect_width, rect_height), color);
             bx = bx.saturating_add(block);
         }
         by = by.saturating_add(block);
     }
+}
+
+fn average_block_color(image: &RgbaImage, x: u32, y: u32, width: u32, height: u32) -> Rgba<u8> {
+    let mut red = 0u64;
+    let mut green = 0u64;
+    let mut blue = 0u64;
+    let mut alpha = 0u64;
+    let mut count = 0u64;
+
+    for py in y..y + height {
+        for px in x..x + width {
+            let [r, g, b, a] = image.get_pixel(px, py).0;
+            red += u64::from(r);
+            green += u64::from(g);
+            blue += u64::from(b);
+            alpha += u64::from(a);
+            count += 1;
+        }
+    }
+
+    if count == 0 {
+        return Rgba([0, 0, 0, 255]);
+    }
+
+    Rgba([
+        (red / count) as u8,
+        (green / count) as u8,
+        (blue / count) as u8,
+        (alpha / count) as u8,
+    ])
 }
 
 fn draw_text_annotation(
@@ -573,6 +783,9 @@ fn capture_screen() -> Result<ScreenshotSession, String> {
             image,
             scale_factor: 1.0,
             undo_stack: Vec::new(),
+            continuous_annotation_active: false,
+            brush_segments: Vec::new(),
+            brush_segment_model: Rc::new(VecModel::from(Vec::<BrushSegment>::new())),
         })
     }
 }

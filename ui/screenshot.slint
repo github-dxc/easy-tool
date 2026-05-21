@@ -4,6 +4,15 @@ import { ColorSwatch } from "./components/ColorSwatch.slint";
 import { StrokeOption } from "./components/StrokeOption.slint";
 import { TextSizeOption } from "./components/TextSizeOption.slint";
 
+export struct BrushSegment {
+    x1: float,
+    y1: float,
+    x2: float,
+    y2: float,
+    color_index: int,
+    stroke_width: float,
+}
+
 export component ScreenshotWindow inherits Window {
     no-frame: true;
     always-on-top: true;
@@ -11,6 +20,9 @@ export component ScreenshotWindow inherits Window {
     default-font-family: "Alibaba PuHuiTi 3.0";
 
     in-out property <image> screenshot;
+    in-out property <[BrushSegment]> brush_segments;
+    in-out property <image> text_preview;
+    in-out property <bool> has_text_preview: false;
     in-out property <bool> has_selection: false;
     in-out property <bool> is_dragging: false;
     in-out property <length> mouse_x: 0px;
@@ -29,9 +41,13 @@ export component ScreenshotWindow inherits Window {
     in-out property <length> text_editor_x: 0px;
     in-out property <length> text_editor_y: 0px;
     in-out property <string> text_editor_value: "";
+    in property <length> text_editor_width: 240px;
+    in property <length> text_editor_height: max(root.selected_text_size * 1px + 14px, 34px);
+    in property <length> text_editor_left: min(max(root.text_editor_x, 8px), max(8px, root.width - root.text_editor_width - 8px));
+    in property <length> text_editor_top: min(max(root.text_editor_y, 8px), max(8px, root.height - root.text_editor_height - 8px));
     in-out property <int> selected_stroke_width: 3;
     in-out property <int> selected_text_size: 24;
-    in-out property <int> selected_color_index: 0;
+    in-out property <int> selected_color_index: 2; // 默认红色
     in property <brush> annotation_color:
         root.selected_color_index == 0 ? #202124 :
         root.selected_color_index == 1 ? #2D7FF9 :
@@ -86,6 +102,10 @@ export component ScreenshotWindow inherits Window {
     callback cancel();
     callback sample_magnifier_pixel(x: int, y: int);
     callback draw_annotation(tool: string, x1: int, y1: int, x2: int, y2: int, text: string, color_index: int, stroke_width: int, text_size: int);
+    callback preview_brush(x1: int, y1: int, x2: int, y2: int, color_index: int, stroke_width: int);
+    callback preview_text(x: int, y: int, text: string, color_index: int, text_size: int);
+    callback clear_text_preview();
+    callback finish_annotation();
     callback undo_annotation();
     
     // 定义给 Rust 后端调用的聚焦回调
@@ -178,9 +198,13 @@ export component ScreenshotWindow inherits Window {
                 if (event.kind == PointerEventKind.move) {
                     root.mouse_x = self.mouse-x;
                     root.mouse_y = self.mouse-y;
-                    root.sample_magnifier_pixel(self.mouse-x / 1px, self.mouse-y / 1px);
+                    if (!root.is_annotating) {
+                        root.sample_magnifier_pixel(self.mouse-x / 1px, self.mouse-y / 1px);
+                    }
                     if (root.is_annotating) {
-                        if (root.active_tool == "brush" || root.active_tool == "mosaic") {
+                        if (root.active_tool == "brush") {
+                            root.preview_brush(root.annotation_last_x / 1px, root.annotation_last_y / 1px, self.mouse-x / 1px, self.mouse-y / 1px, root.selected_color_index, root.selected_stroke_width);
+                        } else if (root.active_tool == "mosaic") {
                             root.draw_annotation(root.active_tool, root.annotation_last_x / 1px, root.annotation_last_y / 1px, self.mouse-x / 1px, self.mouse-y / 1px, "", root.selected_color_index, root.selected_stroke_width, root.selected_text_size);
                         }
                         root.annotation_last_x = self.mouse-x;
@@ -199,6 +223,7 @@ export component ScreenshotWindow inherits Window {
                             root.text_editor_x = self.mouse-x;
                             root.text_editor_y = self.mouse-y;
                             root.text_editor_value = "";
+                            root.clear_text_preview();
                             root.text_editor_visible = true;
                             root.focus_text_editor();
                         } else {
@@ -210,6 +235,7 @@ export component ScreenshotWindow inherits Window {
                         }
                     } else {
                         root.text_editor_visible = false;
+                        root.clear_text_preview();
                         root.start_x = self.mouse-x;
                         root.start_y = self.mouse-y;
                         root.current_x = self.mouse-x;
@@ -224,6 +250,7 @@ export component ScreenshotWindow inherits Window {
                         if (root.active_tool == "rect" || root.active_tool == "circle" || root.active_tool == "arrow") {
                             root.draw_annotation(root.active_tool, root.annotation_start_x / 1px, root.annotation_start_y / 1px, self.mouse-x / 1px, self.mouse-y / 1px, "", root.selected_color_index, root.selected_stroke_width, root.selected_text_size);
                         }
+                        root.finish_annotation();
                         root.is_annotating = false;
                     }
                     root.is_dragging = false;
@@ -240,6 +267,36 @@ export component ScreenshotWindow inherits Window {
             background: transparent;
             border-width: 2px;
             border-color: #4C8BF5;
+        }
+
+        for segment in root.brush_segments: Path {
+            x: 0px;
+            y: 0px;
+            width: root.width;
+            height: root.height;
+            fill: transparent;
+            stroke:
+                segment.color_index == 0 ? #202124 :
+                segment.color_index == 1 ? #2D7FF9 :
+                segment.color_index == 2 ? #FF4D4F :
+                segment.color_index == 3 ? #F4B400 :
+                segment.color_index == 4 ? #24B33A :
+                segment.color_index == 5 ? #9AA0A6 : #FFFFFF;
+            stroke-width: segment.stroke_width * 1px;
+            stroke-line-cap: round;
+            viewbox-width: self.width / 1px;
+            viewbox-height: self.height / 1px;
+            MoveTo { x: segment.x1; y: segment.y1; }
+            LineTo { x: segment.x2; y: segment.y2; }
+        }
+
+        if root.has_text_preview: Image {
+            x: 0px;
+            y: 0px;
+            width: root.width;
+            height: root.height;
+            source: root.text_preview;
+            image-fit: fill;
         }
 
         if root.is_annotating && root.active_tool == "rect": Rectangle {
@@ -281,23 +338,55 @@ export component ScreenshotWindow inherits Window {
 
         arrow_preview := Path {
             visible: root.is_annotating && root.active_tool == "arrow";
-            x: min(root.annotation_start_x, root.annotation_last_x);
-            y: min(root.annotation_start_y, root.annotation_last_y);
-            width: max(1px, max(root.annotation_start_x, root.annotation_last_x) - min(root.annotation_start_x, root.annotation_last_x));
-            height: max(1px, max(root.annotation_start_y, root.annotation_last_y) - min(root.annotation_start_y, root.annotation_last_y));
+            x: 0px;
+            y: 0px;
+            width: root.width;
+            height: root.height;
             fill: transparent;
             stroke: root.annotation_color;
             stroke-width: root.selected_stroke_width * 1px;
             stroke-line-cap: round;
             viewbox-width: self.width / 1px;
             viewbox-height: self.height / 1px;
+            property <float> start_x: root.annotation_start_x / 1px;
+            property <float> start_y: root.annotation_start_y / 1px;
+            property <float> end_x: root.annotation_last_x / 1px;
+            property <float> end_y: root.annotation_last_y / 1px;
+            property <float> dx: arrow_preview.end_x - arrow_preview.start_x;
+            property <float> dy: arrow_preview.end_y - arrow_preview.start_y;
+            property <float> length: max(1, Math.sqrt(arrow_preview.dx * arrow_preview.dx + arrow_preview.dy * arrow_preview.dy));
+            property <float> unit_x: arrow_preview.dx / arrow_preview.length;
+            property <float> unit_y: arrow_preview.dy / arrow_preview.length;
+            property <float> head_len: min(18, arrow_preview.length * 0.35);
+            property <float> head_cos: 0.901;
+            property <float> head_sin: 0.434;
+            property <float> head_left_x: arrow_preview.end_x - arrow_preview.head_len * (arrow_preview.unit_x * arrow_preview.head_cos - arrow_preview.unit_y * arrow_preview.head_sin);
+            property <float> head_left_y: arrow_preview.end_y - arrow_preview.head_len * (arrow_preview.unit_y * arrow_preview.head_cos + arrow_preview.unit_x * arrow_preview.head_sin);
+            property <float> head_right_x: arrow_preview.end_x - arrow_preview.head_len * (arrow_preview.unit_x * arrow_preview.head_cos + arrow_preview.unit_y * arrow_preview.head_sin);
+            property <float> head_right_y: arrow_preview.end_y - arrow_preview.head_len * (arrow_preview.unit_y * arrow_preview.head_cos - arrow_preview.unit_x * arrow_preview.head_sin);
             MoveTo {
-                x: root.annotation_start_x <= root.annotation_last_x ? 0 : arrow_preview.width / 1px;
-                y: root.annotation_start_y <= root.annotation_last_y ? 0 : arrow_preview.height / 1px;
+                x: arrow_preview.start_x;
+                y: arrow_preview.start_y;
             }
             LineTo {
-                x: root.annotation_start_x <= root.annotation_last_x ? arrow_preview.width / 1px : 0;
-                y: root.annotation_start_y <= root.annotation_last_y ? arrow_preview.height / 1px : 0;
+                x: arrow_preview.end_x;
+                y: arrow_preview.end_y;
+            }
+            MoveTo {
+                x: arrow_preview.end_x;
+                y: arrow_preview.end_y;
+            }
+            LineTo {
+                x: arrow_preview.head_left_x;
+                y: arrow_preview.head_left_y;
+            }
+            MoveTo {
+                x: arrow_preview.end_x;
+                y: arrow_preview.end_y;
+            }
+            LineTo {
+                x: arrow_preview.head_right_x;
+                y: arrow_preview.head_right_y;
             }
         }
 
@@ -406,10 +495,10 @@ export component ScreenshotWindow inherits Window {
 
         Rectangle {
             visible: root.text_editor_visible;
-            x: min(root.text_editor_x, root.width - self.width - 8px);
-            y: min(root.text_editor_y, root.height - self.height - 8px);
-            width: 240px;
-            height: max(root.selected_text_size * 1px + 14px, 34px);
+            x: root.text_editor_left;
+            y: root.text_editor_top;
+            width: root.text_editor_width;
+            height: root.text_editor_height;
             background: transparent;
             border-width: 1px;
             border-color: root.annotation_color;
@@ -423,26 +512,32 @@ export component ScreenshotWindow inherits Window {
                 height: parent.height - 4px;
                 text <=> root.text_editor_value;
                 font-size: root.selected_text_size * 1px;
-                color: root.annotation_color;
+                color: transparent;
                 text-cursor-width: 1px;
                 selection-background-color: #CCE0FF;
                 selection-foreground-color: #202124;
+                edited => {
+                    root.preview_text(root.text_editor_left / 1px + 6, root.text_editor_top / 1px + 2, root.text_editor_value, root.selected_color_index, root.selected_text_size);
+                }
                 accepted => {
                     if (root.text_editor_value != "") {
-                        root.draw_annotation("text", root.text_editor_x / 1px + 6, root.text_editor_y / 1px + 2, root.text_editor_x / 1px, root.text_editor_y / 1px, root.text_editor_value, root.selected_color_index, root.selected_stroke_width, root.selected_text_size);
+                        root.draw_annotation("text", root.text_editor_left / 1px + 6, root.text_editor_top / 1px + 2, root.text_editor_left / 1px, root.text_editor_top / 1px, root.text_editor_value, root.selected_color_index, root.selected_stroke_width, root.selected_text_size);
                     }
+                    root.clear_text_preview();
                     root.text_editor_visible = false;
                     root.text_editor_value = "";
                 }
                 key-pressed(event) => {
                     if (event.text == Key.Return) {
                         if (root.text_editor_value != "") {
-                            root.draw_annotation("text", root.text_editor_x / 1px + 6, root.text_editor_y / 1px + 2, root.text_editor_x / 1px, root.text_editor_y / 1px, root.text_editor_value, root.selected_color_index, root.selected_stroke_width, root.selected_text_size);
+                            root.draw_annotation("text", root.text_editor_left / 1px + 6, root.text_editor_top / 1px + 2, root.text_editor_left / 1px, root.text_editor_top / 1px, root.text_editor_value, root.selected_color_index, root.selected_stroke_width, root.selected_text_size);
                         }
+                        root.clear_text_preview();
                         root.text_editor_visible = false;
                         root.text_editor_value = "";
                         accept
                     } else if (event.text == Key.Escape) {
+                        root.clear_text_preview();
                         root.text_editor_visible = false;
                         root.text_editor_value = "";
                         accept
@@ -598,17 +693,17 @@ export component ScreenshotWindow inherits Window {
                 if root.active_tool == "text": TextSizeOption {
                     size_value: 18;
                     is_active: root.selected_text_size == 18;
-                    clicked => { root.selected_text_size = 18; root.focus_text_editor(); }
+                    clicked => { root.selected_text_size = 18; if (root.text_editor_visible) { root.preview_text(root.text_editor_left / 1px + 6, root.text_editor_top / 1px + 2, root.text_editor_value, root.selected_color_index, root.selected_text_size); } root.focus_text_editor(); }
                 }
                 if root.active_tool == "text": TextSizeOption {
                     size_value: 24;
                     is_active: root.selected_text_size == 24;
-                    clicked => { root.selected_text_size = 24; root.focus_text_editor(); }
+                    clicked => { root.selected_text_size = 24; if (root.text_editor_visible) { root.preview_text(root.text_editor_left / 1px + 6, root.text_editor_top / 1px + 2, root.text_editor_value, root.selected_color_index, root.selected_text_size); } root.focus_text_editor(); }
                 }
                 if root.active_tool == "text": TextSizeOption {
                     size_value: 32;
                     is_active: root.selected_text_size == 32;
-                    clicked => { root.selected_text_size = 32; root.focus_text_editor(); }
+                    clicked => { root.selected_text_size = 32; if (root.text_editor_visible) { root.preview_text(root.text_editor_left / 1px + 6, root.text_editor_top / 1px + 2, root.text_editor_value, root.selected_color_index, root.selected_text_size); } root.focus_text_editor(); }
                 }
 
                 Rectangle {
@@ -617,13 +712,13 @@ export component ScreenshotWindow inherits Window {
                     background: #E8EAED;
                 }
 
-                ColorSwatch { swatch_color: #202124; is_active: root.selected_color_index == 0; clicked => { root.selected_color_index = 0; root.focus_text_editor(); } }
-                ColorSwatch { swatch_color: #2D7FF9; is_active: root.selected_color_index == 1; clicked => { root.selected_color_index = 1; root.focus_text_editor(); } }
-                ColorSwatch { swatch_color: #FF4D4F; is_active: root.selected_color_index == 2; clicked => { root.selected_color_index = 2; root.focus_text_editor(); } }
-                ColorSwatch { swatch_color: #F4B400; is_active: root.selected_color_index == 3; clicked => { root.selected_color_index = 3; root.focus_text_editor(); } }
-                ColorSwatch { swatch_color: #24B33A; is_active: root.selected_color_index == 4; clicked => { root.selected_color_index = 4; root.focus_text_editor(); } }
-                ColorSwatch { swatch_color: #9AA0A6; is_active: root.selected_color_index == 5; clicked => { root.selected_color_index = 5; root.focus_text_editor(); } }
-                ColorSwatch { swatch_color: #FFFFFF; is_active: root.selected_color_index == 6; clicked => { root.selected_color_index = 6; root.focus_text_editor(); } }
+                ColorSwatch { swatch_color: #202124; is_active: root.selected_color_index == 0; clicked => { root.selected_color_index = 0; if (root.text_editor_visible) { root.preview_text(root.text_editor_left / 1px + 6, root.text_editor_top / 1px + 2, root.text_editor_value, root.selected_color_index, root.selected_text_size); } root.focus_text_editor(); } }
+                ColorSwatch { swatch_color: #2D7FF9; is_active: root.selected_color_index == 1; clicked => { root.selected_color_index = 1; if (root.text_editor_visible) { root.preview_text(root.text_editor_left / 1px + 6, root.text_editor_top / 1px + 2, root.text_editor_value, root.selected_color_index, root.selected_text_size); } root.focus_text_editor(); } }
+                ColorSwatch { swatch_color: #FF4D4F; is_active: root.selected_color_index == 2; clicked => { root.selected_color_index = 2; if (root.text_editor_visible) { root.preview_text(root.text_editor_left / 1px + 6, root.text_editor_top / 1px + 2, root.text_editor_value, root.selected_color_index, root.selected_text_size); } root.focus_text_editor(); } }
+                ColorSwatch { swatch_color: #F4B400; is_active: root.selected_color_index == 3; clicked => { root.selected_color_index = 3; if (root.text_editor_visible) { root.preview_text(root.text_editor_left / 1px + 6, root.text_editor_top / 1px + 2, root.text_editor_value, root.selected_color_index, root.selected_text_size); } root.focus_text_editor(); } }
+                ColorSwatch { swatch_color: #24B33A; is_active: root.selected_color_index == 4; clicked => { root.selected_color_index = 4; if (root.text_editor_visible) { root.preview_text(root.text_editor_left / 1px + 6, root.text_editor_top / 1px + 2, root.text_editor_value, root.selected_color_index, root.selected_text_size); } root.focus_text_editor(); } }
+                ColorSwatch { swatch_color: #9AA0A6; is_active: root.selected_color_index == 5; clicked => { root.selected_color_index = 5; if (root.text_editor_visible) { root.preview_text(root.text_editor_left / 1px + 6, root.text_editor_top / 1px + 2, root.text_editor_value, root.selected_color_index, root.selected_text_size); } root.focus_text_editor(); } }
+                ColorSwatch { swatch_color: #FFFFFF; is_active: root.selected_color_index == 6; clicked => { root.selected_color_index = 6; if (root.text_editor_visible) { root.preview_text(root.text_editor_left / 1px + 6, root.text_editor_top / 1px + 2, root.text_editor_value, root.selected_color_index, root.selected_text_size); } root.focus_text_editor(); } }
             }
         }
     }
