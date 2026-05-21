@@ -16,7 +16,11 @@ use rusttype::{Font, Scale};
 use slint::{ComponentHandle, Image, ModelRc, Rgba8Pixel, SharedPixelBuffer, VecModel};
 
 use crate::{BrushSegment, ScreenshotWindow};
-use crate::platform::window::{activate_slint_window, hide_taskbar_icon_for, set_window_position};
+use crate::TopImageWindow;
+use crate::platform::window::{
+    activate_slint_window, cursor_position, hide_taskbar_icon_for, set_window_position,
+    window_position,
+};
 
 #[derive(Clone)]
 struct ScreenshotSession {
@@ -49,6 +53,7 @@ struct ScreenBounds {
 
 thread_local! {
     static SCREENSHOT_SESSION: RefCell<Option<ScreenshotSession>> = const { RefCell::new(None) };
+    static PINNED_IMAGE_WINDOWS: RefCell<Vec<TopImageWindow>> = const { RefCell::new(Vec::new()) };
 }
 
 /// Builds the reusable screenshot overlay and wires copy/save/cancel actions.
@@ -97,6 +102,15 @@ pub fn init_screenshot_window() -> ScreenshotWindow {
                 });
             }
             Err(err) => log::error!("save screenshot failed: {err}"),
+        }
+    });
+
+    let weak = window.as_weak();
+    window.on_pin_selection(move |x, y, width, height| {
+        if let Some(ui) = weak.upgrade()
+            && let Err(err) = pin_selection(&ui, x, y, width, height)
+        {
+            log::error!("pin screenshot selection failed: {err}");
         }
     });
 
@@ -223,6 +237,21 @@ pub fn show_screenshot_window(window: &ScreenshotWindow) {
 }
 
 fn cropped_selection(x: i32, y: i32, width: i32, height: i32) -> Result<RgbaImage, String> {
+    Ok(cropped_selection_with_position(x, y, width, height)?.image)
+}
+
+struct PositionedSelection {
+    image: RgbaImage,
+    screen_x: i32,
+    screen_y: i32,
+}
+
+fn cropped_selection_with_position(
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+) -> Result<PositionedSelection, String> {
     if width <= 0 || height <= 0 {
         return Err("empty screenshot selection".into());
     }
@@ -239,8 +268,96 @@ fn cropped_selection(x: i32, y: i32, width: i32, height: i32) -> Result<RgbaImag
         let width = scale_logical_size(width, session.scale_factor).min(session.bounds.width - x);
         let height =
             scale_logical_size(height, session.scale_factor).min(session.bounds.height - y);
-        Ok(image::imageops::crop_imm(&session.image, x, y, width, height).to_image())
+        Ok(PositionedSelection {
+            image: image::imageops::crop_imm(&session.image, x, y, width, height).to_image(),
+            screen_x: session.bounds.x + x as i32,
+            screen_y: session.bounds.y + y as i32,
+        })
     })
+}
+
+fn pin_selection(
+    screenshot_window: &ScreenshotWindow,
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+) -> Result<(), String> {
+    let selection = cropped_selection_with_position(x, y, width, height)?;
+    let image_width = selection.image.width();
+    let image_height = selection.image.height();
+    let image = image_from_rgba(&selection.image);
+    let window = TopImageWindow::new().map_err(|err| format!("create top image failed: {err}"))?;
+    window.set_image(image);
+    window
+        .window()
+        .set_size(slint::PhysicalSize::new(image_width, image_height));
+
+    let drag_state = Rc::new(RefCell::new(None::<DragState>));
+    let weak = window.as_weak();
+    let state = Rc::clone(&drag_state);
+    window.on_start_drag(move || {
+        let Some(ui) = weak.upgrade() else {
+            return;
+        };
+        let Some(cursor) = cursor_position() else {
+            return;
+        };
+        let Some(window_pos) = window_position(&ui) else {
+            return;
+        };
+        *state.borrow_mut() = Some(DragState { cursor, window_pos });
+    });
+
+    let weak = window.as_weak();
+    let state = Rc::clone(&drag_state);
+    window.on_drag(move || {
+        let Some(ui) = weak.upgrade() else {
+            return;
+        };
+        let Some(state) = *state.borrow() else {
+            return;
+        };
+        let Some((cursor_x, cursor_y)) = cursor_position() else {
+            return;
+        };
+        let dx = cursor_x - state.cursor.0;
+        let dy = cursor_y - state.cursor.1;
+        set_window_position(&ui, state.window_pos.0 + dx, state.window_pos.1 + dy);
+    });
+
+    let state = Rc::clone(&drag_state);
+    window.on_end_drag(move || {
+        *state.borrow_mut() = None;
+    });
+
+    let weak = window.as_weak();
+    window.on_close_image(move || {
+        if let Some(ui) = weak.upgrade() {
+            let _ = ui.hide();
+        }
+    });
+
+    window.show().map_err(|err| format!("show top image failed: {err}"))?;
+    hide_taskbar_icon_for(&window);
+    window
+        .window()
+        .set_size(slint::PhysicalSize::new(image_width, image_height));
+    set_window_position(&window, f64::from(selection.screen_x), f64::from(selection.screen_y));
+    let _ = screenshot_window.hide();
+    PINNED_IMAGE_WINDOWS.with(|windows| {
+        windows.borrow_mut().push(window);
+    });
+    SCREENSHOT_SESSION.with(|store| {
+        *store.borrow_mut() = None;
+    });
+    Ok(())
+}
+
+#[derive(Clone, Copy)]
+struct DragState {
+    cursor: (f64, f64),
+    window_pos: (f64, f64),
 }
 
 fn update_magnifier_pixel(window: &ScreenshotWindow, x: i32, y: i32) {

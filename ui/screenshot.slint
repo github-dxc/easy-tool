@@ -58,7 +58,7 @@ export component ScreenshotWindow inherits Window {
     in property <bool> show_tool_options: root.show_toolbar && (root.active_tool == "rect" || root.active_tool == "circle" || root.active_tool == "arrow" || root.active_tool == "brush" || root.active_tool == "text");
     in property <length> toolbar_width: 450px;
     in property <length> tool_options_width: 450px;
-    in property <length> toolbar_x: min(
+    in property <length> toolbar_x: min(/*  */
         max(
             root.toolbar_width <= root.selection_width
                 ? root.selection_right - root.toolbar_width
@@ -99,6 +99,7 @@ export component ScreenshotWindow inherits Window {
 
     callback copy_selection(x: int, y: int, width: int, height: int);
     callback save_selection(x: int, y: int, width: int, height: int);
+    callback pin_selection(x: int, y: int, width: int, height: int);
     callback cancel();
     callback sample_magnifier_pixel(x: int, y: int);
     callback draw_annotation(tool: string, x1: int, y1: int, x2: int, y2: int, text: string, color_index: int, stroke_width: int, text_size: int);
@@ -622,6 +623,12 @@ export component ScreenshotWindow inherits Window {
                 }
 
                 // --- 基础控制组 ---
+                ToolButton {
+                    icon: @image-url("../assets/icons/top-image-32.png");
+                    clicked => {
+                        root.pin_selection(root.selection_left / 1px, root.selection_top / 1px, root.selection_width / 1px, root.selection_height / 1px);
+                    }
+                }
                 ToolButton {
                     icon: @image-url("../assets/icons/save-32.png");
                     clicked => {

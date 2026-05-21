@@ -1,0 +1,50 @@
+export component TopImageWindow inherits Window {
+    no-frame: true;
+    always-on-top: true;
+    background: transparent;
+
+    in-out property <image> image;
+
+    callback start_drag();
+    callback drag();
+    callback end_drag();
+    callback close_image();
+
+    Rectangle {
+        width: root.width;
+        height: root.height;
+        background: transparent;
+        border-width: 1px;
+        border-color: #4C8BF5;
+        clip: true;
+
+        Image {
+            x: 1px;
+            y: 1px;
+            width: parent.width - 2px;
+            height: parent.height - 2px;
+            source: root.image;
+            image-fit: fill;
+        }
+
+        TouchArea {
+            width: parent.width;
+            height: parent.height;
+
+            pointer-event(event) => {
+                if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
+                    root.start_drag();
+                }
+                if (event.button == PointerEventButton.left && event.kind == PointerEventKind.up) {
+                    root.end_drag();
+                }
+                if (event.kind == PointerEventKind.move && self.pressed) {
+                    root.drag();
+                }
+                if (event.button == PointerEventButton.right && event.kind == PointerEventKind.down) {
+                    root.close_image();
+                }
+            }
+        }
+    }
+}

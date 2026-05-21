@@ -19,6 +19,35 @@ pub fn set_window_position(window: &impl ComponentHandle, x: f64, y: f64) {
     });
 }
 
+/// Returns the outer position of a Slint window in physical screen coordinates.
+pub fn window_position(window: &impl ComponentHandle) -> Option<(f64, f64)> {
+    let mut position = None;
+    window.window().with_winit_window(|winit_window| {
+        if let Ok(pos) = winit_window.outer_position() {
+            position = Some((pos.x as f64, pos.y as f64));
+        }
+    });
+    position
+}
+
+/// Returns the current cursor position in physical screen coordinates.
+#[cfg(target_os = "windows")]
+pub fn cursor_position() -> Option<(f64, f64)> {
+    unsafe {
+        use windows_sys::Win32::Foundation::POINT;
+        use windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos;
+
+        let mut point = POINT { x: 0, y: 0 };
+        (GetCursorPos(&mut point) != 0).then_some((point.x as f64, point.y as f64))
+    }
+}
+
+/// Non-Windows platforms do not expose cursor position here yet.
+#[cfg(not(target_os = "windows"))]
+pub fn cursor_position() -> Option<(f64, f64)> {
+    None
+}
+
 /// Returns the current monitor size for the timestamp window.
 pub fn display_size(time_window: &TimeTrans) -> Option<(f64, f64)> {
     let mut width = 0f64;
@@ -53,6 +82,10 @@ pub fn hide_taskbar_icon_for(window: &impl ComponentHandle) {
                 let new_style = (old_style | WS_EX_TOOLWINDOW) & !WS_EX_APPWINDOW;
 
                 if old_style != new_style {
+                    let was_visible = IsWindowVisible(hwnd) != 0;
+                    if was_visible {
+                        ShowWindow(hwnd, SW_HIDE);
+                    }
                     SetWindowLongPtrW(hwnd, GWL_EXSTYLE, new_style as isize);
                     SetWindowPos(
                         hwnd,
@@ -61,8 +94,15 @@ pub fn hide_taskbar_icon_for(window: &impl ComponentHandle) {
                         0,
                         0,
                         0,
-                        SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER,
+                        SWP_FRAMECHANGED
+                            | SWP_NOMOVE
+                            | SWP_NOSIZE
+                            | SWP_NOZORDER
+                            | SWP_NOACTIVATE,
                     );
+                    if was_visible {
+                        ShowWindow(hwnd, SW_SHOWNA);
+                    }
                 }
             }
         }
