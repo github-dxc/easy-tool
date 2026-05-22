@@ -1,11 +1,19 @@
 //! Window helpers that bridge Slint windows with winit and Win32 APIs.
 
+#[cfg(target_os = "windows")]
+use std::cell::Cell;
+
 use i_slint_backend_winit::WinitWindowAccessor;
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use slint::ComponentHandle;
 use winit::dpi::PhysicalPosition;
 
 use crate::TimeTrans;
+
+#[cfg(target_os = "windows")]
+thread_local! {
+    static TASKBAR_OWNER_WINDOW: Cell<isize> = const { Cell::new(0) };
+}
 
 /// Moves the timestamp floating window to an absolute screen position.
 pub fn set_position(time_window: &TimeTrans, x: f64, y: f64) {
@@ -63,50 +71,100 @@ pub fn display_size(time_window: &TimeTrans) -> Option<(f64, f64)> {
     (width > 0f64 && height > 0f64).then_some((width, height))
 }
 
-/// Marks the floating window as a tool window so it stays out of the taskbar.
-pub fn hide_taskbar_icon(time_window: &TimeTrans) {
-    hide_taskbar_icon_for(time_window);
-}
-
 /// Marks any Slint window as a tool window so it stays out of the taskbar.
-pub fn hide_taskbar_icon_for(window: &impl ComponentHandle) {
+pub fn hide_taskbar_icon(window: &impl ComponentHandle) {
     window.window().with_winit_window(|winit_window| {
         if let Ok(handle) = winit_window.window_handle()
             && let RawWindowHandle::Win32(win32_handle) = handle.as_raw()
         {
             let hwnd = win32_handle.hwnd.get() as isize;
-            unsafe {
-                use windows_sys::Win32::UI::WindowsAndMessaging::*;
-
-                let old_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32;
-                let new_style = (old_style | WS_EX_TOOLWINDOW) & !WS_EX_APPWINDOW;
-
-                if old_style != new_style {
-                    let was_visible = IsWindowVisible(hwnd) != 0;
-                    if was_visible {
-                        ShowWindow(hwnd, SW_HIDE);
-                    }
-                    SetWindowLongPtrW(hwnd, GWL_EXSTYLE, new_style as isize);
-                    SetWindowPos(
-                        hwnd,
-                        0,
-                        0,
-                        0,
-                        0,
-                        0,
-                        SWP_FRAMECHANGED
-                            | SWP_NOMOVE
-                            | SWP_NOSIZE
-                            | SWP_NOZORDER
-                            | SWP_NOACTIVATE,
-                    );
-                    if was_visible {
-                        ShowWindow(hwnd, SW_SHOWNA);
-                    }
-                }
-            }
+            hide_hwnd_from_taskbar(hwnd);
         }
     });
+}
+
+#[cfg(target_os = "windows")]
+fn hide_hwnd_from_taskbar(hwnd: isize) {
+    unsafe {
+        use windows_sys::Win32::UI::WindowsAndMessaging::*;
+
+        let old_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32;
+        let new_style = (old_style | WS_EX_TOOLWINDOW) & !WS_EX_APPWINDOW;
+        let owner_hwnd = taskbar_owner_window();
+        let was_visible = IsWindowVisible(hwnd) != 0;
+
+        if was_visible {
+            ShowWindow(hwnd, SW_HIDE);
+        }
+
+        if owner_hwnd != 0 {
+            SetWindowLongPtrW(hwnd, GWLP_HWNDPARENT, owner_hwnd);
+        }
+
+        if old_style != new_style {
+            SetWindowLongPtrW(hwnd, GWL_EXSTYLE, new_style as isize);
+        }
+
+        SetWindowPos(
+            hwnd,
+            0,
+            0,
+            0,
+            0,
+            0,
+            SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+        );
+
+        if was_visible {
+            ShowWindow(hwnd, SW_SHOWNA);
+        }
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn hide_hwnd_from_taskbar(_hwnd: isize) {}
+
+#[cfg(target_os = "windows")]
+fn taskbar_owner_window() -> isize {
+    TASKBAR_OWNER_WINDOW.with(|owner| {
+        let hwnd = owner.get();
+        if hwnd != 0 {
+            return hwnd;
+        }
+
+        let hwnd = create_taskbar_owner_window();
+        owner.set(hwnd);
+        hwnd
+    })
+}
+
+#[cfg(target_os = "windows")]
+fn create_taskbar_owner_window() -> isize {
+    unsafe {
+        use windows_sys::Win32::UI::WindowsAndMessaging::*;
+
+        let class_name = wide_null("STATIC");
+        let window_name = wide_null("easy-tool-taskbar-owner");
+        CreateWindowExW(
+            WS_EX_TOOLWINDOW,
+            class_name.as_ptr(),
+            window_name.as_ptr(),
+            WS_POPUP,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            std::ptr::null(),
+        ) as isize
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn wide_null(value: &str) -> Vec<u16> {
+    value.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
 /// Brings an existing Slint window to the foreground when supported by the platform.

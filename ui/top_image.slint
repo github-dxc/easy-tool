@@ -4,45 +4,68 @@ export component TopImageWindow inherits Window {
     background: transparent;
 
     in-out property <image> image;
+    in-out property <float> image_width: 1;
+    in-out property <float> image_height: 1;
 
     callback start_drag();
     callback drag();
     callback end_drag();
     callback close_image();
+    callback screenshot_shortcut();
+    callback focus_keyboard();
 
-    Rectangle {
+    focus_keyboard => {
+        keyboard_focus.focus();
+    }
+
+    keyboard_focus := FocusScope {
         width: root.width;
         height: root.height;
-        background: transparent;
-        border-width: 1px;
-        border-color: #4C8BF5;
-        clip: true;
 
-        Image {
-            x: 1px;
-            y: 1px;
-            width: parent.width - 2px;
-            height: parent.height - 2px;
-            source: root.image;
-            image-fit: fill;
+        key-pressed(event) => {
+            if ((event.text == "z" || event.text == "Z") && event.modifiers.alt && event.modifiers.shift) {
+                root.screenshot_shortcut();
+                accept
+            } else {
+                reject
+            }
         }
 
-        TouchArea {
-            width: parent.width;
-            height: parent.height;
+        Rectangle {
+            width: root.image_width * 1px + 2px;
+            height: root.image_height * 1px + 2px;
+            background: transparent;
+            border-width: 1px;
+            border-color: #4C8BF5;
+            clip: true;
 
-            pointer-event(event) => {
-                if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
-                    root.start_drag();
-                }
-                if (event.button == PointerEventButton.left && event.kind == PointerEventKind.up) {
-                    root.end_drag();
-                }
-                if (event.kind == PointerEventKind.move && self.pressed) {
-                    root.drag();
-                }
-                if (event.button == PointerEventButton.right && event.kind == PointerEventKind.down) {
-                    root.close_image();
+            Image {
+                x: 1px;
+                y: 1px;
+                width: root.image_width * 1px;
+                height: root.image_height * 1px;
+                source: root.image;
+                image-fit: fill;
+            }
+
+            TouchArea {
+                width: parent.width;
+                height: parent.height;
+
+                pointer-event(event) => {
+                    if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
+                        keyboard_focus.focus();
+                        root.start_drag();
+                    }
+                    if (event.button == PointerEventButton.left && event.kind == PointerEventKind.up) {
+                        root.end_drag();
+                    }
+                    if (event.kind == PointerEventKind.move && self.pressed) {
+                        root.drag();
+                    }
+                    if (event.button == PointerEventButton.right && event.kind == PointerEventKind.down) {
+                        root.close_image();
+                    }
                 }
             }
         }

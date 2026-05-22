@@ -15,12 +15,12 @@ use imageproc::rect::Rect;
 use rusttype::{Font, Scale};
 use slint::{ComponentHandle, Image, ModelRc, Rgba8Pixel, SharedPixelBuffer, VecModel};
 
-use crate::{BrushSegment, ScreenshotWindow};
-use crate::TopImageWindow;
-use crate::platform::window::{
-    activate_slint_window, cursor_position, hide_taskbar_icon_for, set_window_position,
-    window_position,
+use crate::features::top_image::window::{
+    hide_pinned_images_for_screenshot, open_pinned_image, restore_pinned_images_after_screenshot,
 };
+
+use crate::platform::window::{activate_slint_window, hide_taskbar_icon, set_window_position};
+use crate::{BrushSegment, ScreenshotWindow};
 
 #[derive(Clone)]
 struct ScreenshotSession {
@@ -53,7 +53,6 @@ struct ScreenBounds {
 
 thread_local! {
     static SCREENSHOT_SESSION: RefCell<Option<ScreenshotSession>> = const { RefCell::new(None) };
-    static PINNED_IMAGE_WINDOWS: RefCell<Vec<TopImageWindow>> = const { RefCell::new(Vec::new()) };
 }
 
 /// Builds the reusable screenshot overlay and wires copy/save/cancel actions.
@@ -71,12 +70,8 @@ pub fn init_screenshot_window() -> ScreenshotWindow {
     window.on_copy_selection(move |x, y, width, height| {
         match cropped_selection(x, y, width, height).and_then(copy_image) {
             Ok(()) => {
-                SCREENSHOT_SESSION.with(|store| {
-                    *store.borrow_mut() = None;
-                });
-
                 if let Some(ui) = weak.upgrade() {
-                    let _ = ui.hide();
+                    cancel_screenshot_window(&ui);
                 }
             }
             Err(err) => log::error!("copy screenshot failed: {err}"),
@@ -87,12 +82,8 @@ pub fn init_screenshot_window() -> ScreenshotWindow {
     window.on_save_selection(move |x, y, width, height| {
         match cropped_selection(x, y, width, height) {
             Ok(image) => {
-                SCREENSHOT_SESSION.with(|store| {
-                    *store.borrow_mut() = None;
-                });
-
                 if let Some(ui) = weak.upgrade() {
-                    let _ = ui.hide();
+                    cancel_screenshot_window(&ui);
                 }
 
                 std::thread::spawn(move || {
@@ -122,24 +113,26 @@ pub fn init_screenshot_window() -> ScreenshotWindow {
     });
 
     let weak = window.as_weak();
-    window.on_draw_annotation(move |tool, x1, y1, x2, y2, text, color_index, stroke_width, text_size| {
-        if let Some(ui) = weak.upgrade() {
-            if let Err(err) = draw_annotation(
-                &ui,
-                tool.as_str(),
-                x1,
-                y1,
-                x2,
-                y2,
-                text.as_str(),
-                color_index,
-                stroke_width,
-                text_size,
-            ) {
-                log::error!("draw screenshot annotation failed: {err}");
+    window.on_draw_annotation(
+        move |tool, x1, y1, x2, y2, text, color_index, stroke_width, text_size| {
+            if let Some(ui) = weak.upgrade() {
+                if let Err(err) = draw_annotation(
+                    &ui,
+                    tool.as_str(),
+                    x1,
+                    y1,
+                    x2,
+                    y2,
+                    text.as_str(),
+                    color_index,
+                    stroke_width,
+                    text_size,
+                ) {
+                    log::error!("draw screenshot annotation failed: {err}");
+                }
             }
-        }
-    });
+        },
+    );
 
     let weak = window.as_weak();
     window.on_preview_brush(move |x1, y1, x2, y2, color_index, stroke_width| {
@@ -188,11 +181,18 @@ pub fn cancel_screenshot_window(window: &ScreenshotWindow) {
     SCREENSHOT_SESSION.with(|store| {
         *store.borrow_mut() = None;
     });
+    restore_pinned_images_after_screenshot();
     let _ = window.hide();
 }
 
 /// Captures the desktop and shows a full-screen selection overlay.
 pub fn show_screenshot_window(window: &ScreenshotWindow) {
+    if window.window().is_visible() || SCREENSHOT_SESSION.with(|store| store.borrow().is_some()) {
+        return;
+    }
+
+    hide_pinned_images_for_screenshot();
+
     match capture_screen() {
         Ok(session) => {
             let preview = image_from_rgba(&session.image);
@@ -217,7 +217,7 @@ pub fn show_screenshot_window(window: &ScreenshotWindow) {
             set_window_position(window, bounds.x as f64, bounds.y as f64);
 
             let _ = window.show();
-            hide_taskbar_icon_for(window);
+            hide_taskbar_icon(window);
             activate_slint_window(window);
             let scale_factor = window.window().scale_factor().max(1.0);
             SCREENSHOT_SESSION.with(|store| {
@@ -232,7 +232,10 @@ pub fn show_screenshot_window(window: &ScreenshotWindow) {
             });
             window.invoke_focus_overlay();
         }
-        Err(err) => log::error!("capture screen failed: {err}"),
+        Err(err) => {
+            restore_pinned_images_after_screenshot();
+            log::error!("capture screen failed: {err}");
+        }
     }
 }
 
@@ -284,80 +287,12 @@ fn pin_selection(
     height: i32,
 ) -> Result<(), String> {
     let selection = cropped_selection_with_position(x, y, width, height)?;
-    let image_width = selection.image.width();
-    let image_height = selection.image.height();
-    let image = image_from_rgba(&selection.image);
-    let window = TopImageWindow::new().map_err(|err| format!("create top image failed: {err}"))?;
-    window.set_image(image);
-    window
-        .window()
-        .set_size(slint::PhysicalSize::new(image_width, image_height));
-
-    let drag_state = Rc::new(RefCell::new(None::<DragState>));
-    let weak = window.as_weak();
-    let state = Rc::clone(&drag_state);
-    window.on_start_drag(move || {
-        let Some(ui) = weak.upgrade() else {
-            return;
-        };
-        let Some(cursor) = cursor_position() else {
-            return;
-        };
-        let Some(window_pos) = window_position(&ui) else {
-            return;
-        };
-        *state.borrow_mut() = Some(DragState { cursor, window_pos });
-    });
-
-    let weak = window.as_weak();
-    let state = Rc::clone(&drag_state);
-    window.on_drag(move || {
-        let Some(ui) = weak.upgrade() else {
-            return;
-        };
-        let Some(state) = *state.borrow() else {
-            return;
-        };
-        let Some((cursor_x, cursor_y)) = cursor_position() else {
-            return;
-        };
-        let dx = cursor_x - state.cursor.0;
-        let dy = cursor_y - state.cursor.1;
-        set_window_position(&ui, state.window_pos.0 + dx, state.window_pos.1 + dy);
-    });
-
-    let state = Rc::clone(&drag_state);
-    window.on_end_drag(move || {
-        *state.borrow_mut() = None;
-    });
-
-    let weak = window.as_weak();
-    window.on_close_image(move || {
-        if let Some(ui) = weak.upgrade() {
-            let _ = ui.hide();
-        }
-    });
-
-    window.show().map_err(|err| format!("show top image failed: {err}"))?;
-    hide_taskbar_icon_for(&window);
-    window
-        .window()
-        .set_size(slint::PhysicalSize::new(image_width, image_height));
-    set_window_position(&window, f64::from(selection.screen_x), f64::from(selection.screen_y));
-    let _ = screenshot_window.hide();
-    PINNED_IMAGE_WINDOWS.with(|windows| {
-        windows.borrow_mut().push(window);
-    });
-    SCREENSHOT_SESSION.with(|store| {
-        *store.borrow_mut() = None;
-    });
-    Ok(())
-}
-
-#[derive(Clone, Copy)]
-struct DragState {
-    cursor: (f64, f64),
-    window_pos: (f64, f64),
+    cancel_screenshot_window(&screenshot_window);
+    open_pinned_image(
+        selection.image,
+        selection.screen_x,
+        selection.screen_y,
+    )
 }
 
 fn update_magnifier_pixel(window: &ScreenshotWindow, x: i32, y: i32) {
@@ -373,9 +308,7 @@ fn update_magnifier_pixel(window: &ScreenshotWindow, x: i32, y: i32) {
             .clamp(0, session.bounds.height.saturating_sub(1) as i32) as u32;
         let [r, g, b, _] = session.image.get_pixel(pixel_x, pixel_y).0;
 
-        window.set_magnifier_center_text(
-            format!("Center: {pixel_x}, {pixel_y}").into(),
-        );
+        window.set_magnifier_center_text(format!("Center: {pixel_x}, {pixel_y}").into());
         window.set_magnifier_hex_text(format!("HEX: #{r:02X}{g:02X}{b:02X}").into());
         window.set_magnifier_rgb_text(format!("RGB: {r}, {g}, {b}").into());
     });
@@ -422,7 +355,9 @@ fn draw_annotation(
             "circle" => {
                 draw_ellipse_annotation(&mut session.image, x1, y1, x2, y2, color, stroke_width)
             }
-            "arrow" => draw_arrow_annotation(&mut session.image, x1, y1, x2, y2, color, stroke_width),
+            "arrow" => {
+                draw_arrow_annotation(&mut session.image, x1, y1, x2, y2, color, stroke_width)
+            }
             "brush" => draw_thick_line(&mut session.image, x1, y1, x2, y2, color, stroke_width),
             "mosaic" => draw_mosaic_annotation(&mut session.image, x1, y1, x2, y2),
             "text" => draw_text_annotation(&mut session.image, x1, y1, text, color, text_size),
@@ -513,8 +448,11 @@ fn preview_text(
         let text_size =
             scale_logical_coordinate(text_size.clamp(12, 64), session.scale_factor).max(1);
 
-        let mut preview =
-            RgbaImage::from_pixel(session.bounds.width, session.bounds.height, Rgba([0, 0, 0, 0]));
+        let mut preview = RgbaImage::from_pixel(
+            session.bounds.width,
+            session.bounds.height,
+            Rgba([0, 0, 0, 0]),
+        );
         draw_text_annotation(&mut preview, x, y, text, color, text_size);
         window.set_text_preview(image_from_rgba(&preview));
         window.set_has_text_preview(true);
@@ -633,10 +571,21 @@ fn draw_arrow_annotation(
     let angle = ((y2 - y1) as f32).atan2((x2 - x1) as f32);
     let head_len = 18.0;
     let spread = std::f32::consts::PI / 7.0;
-    for head_angle in [angle + std::f32::consts::PI - spread, angle + std::f32::consts::PI + spread] {
+    for head_angle in [
+        angle + std::f32::consts::PI - spread,
+        angle + std::f32::consts::PI + spread,
+    ] {
         let hx = x2 as f32 + head_len * head_angle.cos();
         let hy = y2 as f32 + head_len * head_angle.sin();
-        draw_thick_line(image, x2, y2, hx.round() as i32, hy.round() as i32, color, stroke_width);
+        draw_thick_line(
+            image,
+            x2,
+            y2,
+            hx.round() as i32,
+            hy.round() as i32,
+            color,
+            stroke_width,
+        );
     }
 }
 
@@ -679,7 +628,11 @@ fn draw_mosaic_annotation(image: &mut RgbaImage, x1: i32, y1: i32, x2: i32, y2: 
             let rect_width = (block as u32).min(right - bx + 1);
             let rect_height = (block as u32).min(bottom - by + 1);
             let color = average_block_color(image, bx, by, rect_width, rect_height);
-            draw_filled_rect_mut(image, Rect::at(bx as i32, by as i32).of_size(rect_width, rect_height), color);
+            draw_filled_rect_mut(
+                image,
+                Rect::at(bx as i32, by as i32).of_size(rect_width, rect_height),
+                color,
+            );
             bx = bx.saturating_add(block);
         }
         by = by.saturating_add(block);
@@ -728,10 +681,20 @@ fn draw_text_annotation(
         return;
     }
 
-    let Some(font) = Font::try_from_bytes(include_bytes!("../../../assets/font/AlibabaPuHuiTi-3-55-Regular.ttf") as &[u8]) else {
+    let Some(font) = Font::try_from_bytes(include_bytes!(
+        "../../../assets/font/AlibabaPuHuiTi-3-55-Regular.ttf"
+    ) as &[u8]) else {
         return;
     };
-    draw_text_mut(image, color, x, y, Scale::uniform(text_size as f32), &font, text);
+    draw_text_mut(
+        image,
+        color,
+        x,
+        y,
+        Scale::uniform(text_size as f32),
+        &font,
+        text,
+    );
 }
 
 fn scale_logical_coordinate(value: i32, scale_factor: f32) -> i32 {

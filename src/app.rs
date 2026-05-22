@@ -133,6 +133,9 @@ pub fn run() {
                 *mouse_y.lock().unwrap() = y;
             }
 
+            // update shortcut_state
+            update_shortcut_state(&shortcut_state, &event.event_type);
+            
             if matches!(event.event_type, EventType::KeyPress(Key::Escape)) {
                 let _ = weak_screenshot_window.upgrade_in_event_loop(move |window| {
                     if window.window().is_visible() {
@@ -141,9 +144,8 @@ pub fn run() {
                 });
             }
 
-            let should_show_history = update_shortcut_state(&shortcut_state, &event.event_type);
-            if should_show_history && !suppress_shortcuts.load(Ordering::SeqCst) {
-                shortcut_state.lock().unwrap().clear();
+            if should_show_history(&shortcut_state, &event.event_type)
+                && !suppress_shortcuts.load(Ordering::SeqCst) {
                 if settings.lock().unwrap().clipboard_history.enabled {
                     let history = Arc::clone(&clipboard_history);
                     weak_history_window
@@ -157,7 +159,6 @@ pub fn run() {
             if should_show_screenshot(&shortcut_state, &event.event_type)
                 && !suppress_shortcuts.load(Ordering::SeqCst)
             {
-                shortcut_state.lock().unwrap().clear();
                 weak_screenshot_window
                     .upgrade_in_event_loop(move |window| {
                         show_screenshot_window(&window);
@@ -268,20 +269,14 @@ struct ShortcutState {
     ctrl: bool,
     alt: bool,
     shift: bool,
-}
-
-impl ShortcutState {
-    fn clear(&mut self) {
-        self.ctrl = false;
-        self.alt = false;
-        self.shift = false;
-    }
+    c: bool,
+    z: bool,
 }
 
 fn update_shortcut_state(
     shortcut_state: &Arc<Mutex<ShortcutState>>,
     event_type: &EventType,
-) -> bool {
+) {
     let mut state = shortcut_state.lock().unwrap();
 
     match event_type {
@@ -291,17 +286,34 @@ fn update_shortcut_state(
         EventType::KeyRelease(Key::Alt | Key::AltGr) => state.alt = false,
         EventType::KeyPress(Key::ShiftLeft | Key::ShiftRight) => state.shift = true,
         EventType::KeyRelease(Key::ShiftLeft | Key::ShiftRight) => state.shift = false,
-        EventType::KeyPress(Key::KeyC) => return state.ctrl && state.shift,
+        EventType::KeyPress(Key::KeyC) => state.c = true,
+        EventType::KeyRelease(Key::KeyC) => state.c = false,
+        EventType::KeyPress(Key::KeyZ) => state.z = true,
+        EventType::KeyRelease(Key::KeyZ) => state.z = false,
         _ => {}
     }
+}
 
-    false
+fn should_show_history(
+    shortcut_state: &Arc<Mutex<ShortcutState>>,
+    event_type: &EventType,
+) -> bool {
+    if !matches!(event_type, EventType::KeyPress(Key::KeyC)) {
+        return false;
+    }
+
+    let state = shortcut_state.lock().unwrap();
+    state.ctrl && state.shift
 }
 
 fn should_show_screenshot(
     shortcut_state: &Arc<Mutex<ShortcutState>>,
     event_type: &EventType,
 ) -> bool {
+    if !matches!(event_type, EventType::KeyPress(Key::KeyZ)) {
+        return false;
+    }
+
     let state = shortcut_state.lock().unwrap();
-    matches!(event_type, EventType::KeyPress(Key::KeyZ)) && state.alt && state.shift
+    state.alt && state.shift
 }
