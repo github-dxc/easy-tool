@@ -7,7 +7,7 @@ use slint::ComponentHandle;
 use crate::TimeTrans;
 use crate::config::{TIMEZONE_LABELS, TIMEZONES};
 use crate::features::time_trans::converter::trans_string_timestamp;
-use crate::platform::window::hide_taskbar_icon;
+use crate::platform::window::show_without_taskbar_icon;
 
 /// Builds the timestamp converter window and binds all UI callbacks.
 pub fn init_time_trans_window() -> TimeTrans {
@@ -41,8 +41,7 @@ fn bind_visibility_callbacks(time_window: &TimeTrans) {
     let weak = time_window.as_weak();
     time_window.on_show_window(move || {
         if let Some(ui) = weak.upgrade() {
-            let _ = ui.show();
-            hide_taskbar_icon(&ui);
+            let _ = show_without_taskbar_icon(&ui);
         }
     });
 }

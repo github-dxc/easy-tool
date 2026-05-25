@@ -135,7 +135,7 @@ pub fn run() {
 
             // update shortcut_state
             update_shortcut_state(&shortcut_state, &event.event_type);
-            
+
             if matches!(event.event_type, EventType::KeyPress(Key::Escape)) {
                 let _ = weak_screenshot_window.upgrade_in_event_loop(move |window| {
                     if window.window().is_visible() {
@@ -145,7 +145,8 @@ pub fn run() {
             }
 
             if should_show_history(&shortcut_state, &event.event_type)
-                && !suppress_shortcuts.load(Ordering::SeqCst) {
+                && !suppress_shortcuts.load(Ordering::SeqCst)
+            {
                 if settings.lock().unwrap().clipboard_history.enabled {
                     let history = Arc::clone(&clipboard_history);
                     weak_history_window
@@ -159,11 +160,13 @@ pub fn run() {
             if should_show_screenshot(&shortcut_state, &event.event_type)
                 && !suppress_shortcuts.load(Ordering::SeqCst)
             {
-                weak_screenshot_window
-                    .upgrade_in_event_loop(move |window| {
-                        show_screenshot_window(&window);
-                    })
-                    .expect("failed to show screenshot window");
+                if settings.lock().unwrap().screenshot.enabled {
+                    weak_screenshot_window
+                        .upgrade_in_event_loop(move |window| {
+                            show_screenshot_window(&window);
+                        })
+                        .expect("failed to show screenshot window");
+                }
             }
 
             if event.name.as_deref() == Some("\u{3}") {
@@ -273,10 +276,7 @@ struct ShortcutState {
     z: bool,
 }
 
-fn update_shortcut_state(
-    shortcut_state: &Arc<Mutex<ShortcutState>>,
-    event_type: &EventType,
-) {
+fn update_shortcut_state(shortcut_state: &Arc<Mutex<ShortcutState>>, event_type: &EventType) {
     let mut state = shortcut_state.lock().unwrap();
 
     match event_type {
@@ -294,12 +294,13 @@ fn update_shortcut_state(
     }
 }
 
-fn should_show_history(
-    shortcut_state: &Arc<Mutex<ShortcutState>>,
-    event_type: &EventType,
-) -> bool {
+fn should_show_history(shortcut_state: &Arc<Mutex<ShortcutState>>, event_type: &EventType) -> bool {
     if !matches!(event_type, EventType::KeyPress(Key::KeyC)) {
         return false;
+    }
+
+    if let Some(modifiers) = current_system_modifiers() {
+        return modifiers.ctrl && modifiers.shift;
     }
 
     let state = shortcut_state.lock().unwrap();
@@ -314,6 +315,37 @@ fn should_show_screenshot(
         return false;
     }
 
+    if let Some(modifiers) = current_system_modifiers() {
+        return modifiers.alt && modifiers.shift;
+    }
+
     let state = shortcut_state.lock().unwrap();
     state.alt && state.shift
+}
+
+#[derive(Clone, Copy)]
+struct ShortcutModifiers {
+    ctrl: bool,
+    alt: bool,
+    shift: bool,
+}
+
+#[cfg(target_os = "windows")]
+fn current_system_modifiers() -> Option<ShortcutModifiers> {
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
+        GetAsyncKeyState, VK_CONTROL, VK_MENU, VK_SHIFT,
+    };
+
+    const KEY_IS_DOWN: i16 = i16::MIN;
+
+    Some(ShortcutModifiers {
+        ctrl: unsafe { GetAsyncKeyState(VK_CONTROL as i32) & KEY_IS_DOWN != 0 },
+        alt: unsafe { GetAsyncKeyState(VK_MENU as i32) & KEY_IS_DOWN != 0 },
+        shift: unsafe { GetAsyncKeyState(VK_SHIFT as i32) & KEY_IS_DOWN != 0 },
+    })
+}
+
+#[cfg(not(target_os = "windows"))]
+fn current_system_modifiers() -> Option<ShortcutModifiers> {
+    None
 }

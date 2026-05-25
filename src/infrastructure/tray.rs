@@ -13,6 +13,7 @@ use crate::settings::{AppSettings, SettingsStore, TranslationDirection};
 
 const COPY_TIMESTAMP_MENU_ID: &str = "copy_timestamp_enabled";
 const CLIPBOARD_HISTORY_MENU_ID: &str = "clipboard_history_enabled";
+const SCREENSHOT_MENU_ID: &str = "screenshot_enabled";
 const TEXT_TRANSLATION_ZH_EN_MENU_ID: &str = "text_translation_zh_en";
 const TEXT_TRANSLATION_EN_ZH_MENU_ID: &str = "text_translation_en_zh";
 const QUIT_MENU_ID: &str = "quit";
@@ -23,6 +24,7 @@ pub struct TrayState {
     pub menu: Menu,
     copy_timestamp_item: CheckMenuItem,
     clipboard_history_item: CheckMenuItem,
+    screenshot_item: CheckMenuItem,
     text_translation_zh_en_item: CheckMenuItem,
     text_translation_en_zh_item: CheckMenuItem,
 }
@@ -31,6 +33,7 @@ pub struct TrayState {
 pub struct TrayMenuHandles {
     copy_timestamp_item: CheckMenuItem,
     clipboard_history_item: CheckMenuItem,
+    screenshot_item: CheckMenuItem,
     text_translation_zh_en_item: CheckMenuItem,
     text_translation_en_zh_item: CheckMenuItem,
 }
@@ -40,6 +43,7 @@ impl TrayState {
         TrayMenuHandles {
             copy_timestamp_item: self.copy_timestamp_item.clone(),
             clipboard_history_item: self.clipboard_history_item.clone(),
+            screenshot_item: self.screenshot_item.clone(),
             text_translation_zh_en_item: self.text_translation_zh_en_item.clone(),
             text_translation_en_zh_item: self.text_translation_en_zh_item.clone(),
         }
@@ -52,6 +56,8 @@ impl TrayMenuHandles {
             .set_checked(settings.copy_timestamp.enabled);
         self.clipboard_history_item
             .set_checked(settings.clipboard_history.enabled);
+        self.screenshot_item
+            .set_checked(settings.screenshot.enabled);
         self.text_translation_zh_en_item.set_checked(
             settings.text_translation.enabled
                 && settings.text_translation.direction == TranslationDirection::ZhToEn,
@@ -84,6 +90,15 @@ pub fn init_tray_icon(settings: &AppSettings) -> TrayState {
         None,
     );
     tray_menu.append(&clipboard_history_item).unwrap();
+
+    let screenshot_item = CheckMenuItem::with_id(
+        SCREENSHOT_MENU_ID,
+        "截图快捷键 - alt+shift+z",
+        true,
+        settings.screenshot.enabled,
+        None,
+    );
+    tray_menu.append(&screenshot_item).unwrap();
 
     let text_translation_menu = Submenu::new("翻译文本 - ctrl+c", true);
     let text_translation_zh_en_item = CheckMenuItem::with_id(
@@ -128,6 +143,7 @@ pub fn init_tray_icon(settings: &AppSettings) -> TrayState {
         menu: tray_menu,
         copy_timestamp_item,
         clipboard_history_item,
+        screenshot_item,
         text_translation_zh_en_item,
         text_translation_en_zh_item,
     }
@@ -144,6 +160,7 @@ pub fn start_tray_event_pump(
     let tray_timer = slint::Timer::default();
     let copy_timestamp_item = tray_state.copy_timestamp_item.clone();
     let clipboard_history_item = tray_state.clipboard_history_item.clone();
+    let screenshot_item = tray_state.screenshot_item.clone();
     let text_translation_zh_en_item = tray_state.text_translation_zh_en_item.clone();
     let text_translation_en_zh_item = tray_state.text_translation_en_zh_item.clone();
 
@@ -152,8 +169,6 @@ pub fn start_tray_event_pump(
         Duration::from_millis(16),
         move || {
             while let Ok(event) = TrayIconEvent::receiver().try_recv() {
-                info!("tray icon event: {event:?}");
-
                 if let TrayIconEvent::Click {
                     button: MouseButton::Left,
                     button_state: MouseButtonState::Up,
@@ -177,6 +192,12 @@ pub fn start_tray_event_pump(
                     let checked = clipboard_history_item.is_checked();
                     if let Ok(mut settings) = settings.lock() {
                         settings.clipboard_history.enabled = checked;
+                        save_settings(&settings_store, &settings);
+                    }
+                } else if event.id.as_ref() == SCREENSHOT_MENU_ID {
+                    let checked = screenshot_item.is_checked();
+                    if let Ok(mut settings) = settings.lock() {
+                        settings.screenshot.enabled = checked;
                         save_settings(&settings_store, &settings);
                     }
                 } else if event.id.as_ref() == TEXT_TRANSLATION_ZH_EN_MENU_ID {

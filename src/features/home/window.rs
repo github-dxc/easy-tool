@@ -11,7 +11,7 @@ use crate::features::file_preview::window::show_empty_file_preview_window;
 use crate::features::screenshot::window::show_screenshot_window;
 use crate::features::settings::window::show_settings_window;
 use crate::features::text_translation::window::show_translation_pending;
-use crate::platform::window::{activate_slint_window, hide_taskbar_icon};
+use crate::platform::window::{activate_slint_window, show_without_taskbar_icon};
 use crate::settings::AppSettings;
 use crate::{
     ClipboardHistoryWindow, FilePreviewWindow, HomeWindow, ScreenshotWindow, SettingsWindow,
@@ -38,8 +38,7 @@ pub fn init_home_window(
     let weak_time = time_trans_window.as_weak();
     window.on_open_time_trans(move || {
         if let Some(ui) = weak_time.upgrade() {
-            let _ = ui.show();
-            hide_taskbar_icon(&ui);
+            let _ = show_without_taskbar_icon(&ui);
             activate_slint_window(&ui);
         }
     });

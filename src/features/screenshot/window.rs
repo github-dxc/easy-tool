@@ -19,7 +19,9 @@ use crate::features::top_image::window::{
     hide_pinned_images_for_screenshot, open_pinned_image, restore_pinned_images_after_screenshot,
 };
 
-use crate::platform::window::{activate_slint_window, hide_taskbar_icon, set_window_position};
+use crate::platform::window::{
+    activate_slint_window, set_window_position, show_without_taskbar_icon,
+};
 use crate::{BrushSegment, ScreenshotWindow};
 
 #[derive(Clone)]
@@ -178,10 +180,16 @@ pub fn init_screenshot_window() -> ScreenshotWindow {
 
 /// Hides the screenshot overlay and drops the captured bitmap for the current session.
 pub fn cancel_screenshot_window(window: &ScreenshotWindow) {
+    finish_screenshot_window(window, true);
+}
+
+fn finish_screenshot_window(window: &ScreenshotWindow, restore_pinned_images: bool) {
     SCREENSHOT_SESSION.with(|store| {
         *store.borrow_mut() = None;
     });
-    restore_pinned_images_after_screenshot();
+    if restore_pinned_images {
+        restore_pinned_images_after_screenshot();
+    }
     let _ = window.hide();
 }
 
@@ -216,8 +224,7 @@ pub fn show_screenshot_window(window: &ScreenshotWindow) {
             window.set_magnifier_rgb_text("RGB: 0, 0, 0".into());
             set_window_position(window, bounds.x as f64, bounds.y as f64);
 
-            let _ = window.show();
-            hide_taskbar_icon(window);
+            let _ = show_without_taskbar_icon(window);
             activate_slint_window(window);
             let scale_factor = window.window().scale_factor().max(1.0);
             SCREENSHOT_SESSION.with(|store| {
@@ -287,12 +294,15 @@ fn pin_selection(
     height: i32,
 ) -> Result<(), String> {
     let selection = cropped_selection_with_position(x, y, width, height)?;
-    cancel_screenshot_window(&screenshot_window);
+    restore_pinned_images_after_screenshot();
     open_pinned_image(
         selection.image,
         selection.screen_x,
         selection.screen_y,
-    )
+        screenshot_window.as_weak(),
+    )?;
+    finish_screenshot_window(&screenshot_window, false);
+    Ok(())
 }
 
 fn update_magnifier_pixel(window: &ScreenshotWindow, x: i32, y: i32) {

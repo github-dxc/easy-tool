@@ -5,12 +5,12 @@ use std::sync::{Arc, Mutex};
 
 use slint::{CloseRequestResponse, ComponentHandle};
 
+use crate::SettingsWindow;
 use crate::features::text_translation::translator::TranslationService;
 use crate::infrastructure::tray::TrayMenuHandles;
 use crate::platform::dialog::{open_folder_dialog, show_message_box};
 use crate::platform::window::activate_slint_window;
 use crate::settings::{AppSettings, SettingsStore, TextTranslationSettings, TranslationDirection};
-use crate::SettingsWindow;
 
 pub fn init_settings_window(
     settings: Arc<Mutex<AppSettings>>,
@@ -20,7 +20,9 @@ pub fn init_settings_window(
 ) -> SettingsWindow {
     let window = SettingsWindow::new().unwrap();
 
-    window.window().on_close_requested(|| CloseRequestResponse::HideWindow);
+    window
+        .window()
+        .on_close_requested(|| CloseRequestResponse::HideWindow);
 
     {
         let weak_window = window.as_weak();
@@ -80,6 +82,7 @@ pub fn init_settings_window(
         window.on_apply_settings(
             move |copy_timestamp_enabled,
                   clipboard_history_enabled,
+                  screenshot_enabled,
                   text_translation_enabled,
                   zh_to_en_enabled,
                   zh_to_en_model_dir,
@@ -92,6 +95,7 @@ pub fn init_settings_window(
                     &tray_menu_handles,
                     copy_timestamp_enabled,
                     clipboard_history_enabled,
+                    screenshot_enabled,
                     text_translation_enabled,
                     zh_to_en_enabled,
                     &zh_to_en_model_dir,
@@ -117,10 +121,10 @@ pub fn init_settings_window(
 pub fn show_settings_window(window: &SettingsWindow, settings: &AppSettings) {
     window.set_copy_timestamp_enabled(settings.copy_timestamp.enabled);
     window.set_clipboard_history_enabled(settings.clipboard_history.enabled);
+    window.set_screenshot_enabled(settings.screenshot.enabled);
     window.set_text_translation_enabled(settings.text_translation.enabled);
-    window.set_zh_to_en_enabled(
-        settings.text_translation.direction == TranslationDirection::ZhToEn,
-    );
+    window
+        .set_zh_to_en_enabled(settings.text_translation.direction == TranslationDirection::ZhToEn);
     window.set_zh_to_en_model_dir(
         settings
             .text_translation
@@ -138,10 +142,18 @@ pub fn show_settings_window(window: &SettingsWindow, settings: &AppSettings) {
             .into(),
     );
     window.set_text_translation_debounce_seconds(
-        settings.text_translation.debounce_seconds.to_string().into(),
+        settings
+            .text_translation
+            .debounce_seconds
+            .to_string()
+            .into(),
     );
     window.set_last_valid_text_translation_debounce_seconds(
-        settings.text_translation.debounce_seconds.to_string().into(),
+        settings
+            .text_translation
+            .debounce_seconds
+            .to_string()
+            .into(),
     );
 
     let _ = window.show();
@@ -158,7 +170,12 @@ fn path_from_string(path: &str) -> Option<PathBuf> {
 }
 
 fn debounce_seconds_from_string(value: &str) -> u64 {
-    value.trim().parse::<u64>().ok().filter(|v| *v > 0).unwrap_or(1)
+    value
+        .trim()
+        .parse::<u64>()
+        .ok()
+        .filter(|v| *v > 0)
+        .unwrap_or(1)
 }
 
 fn apply_from_window(
@@ -175,6 +192,7 @@ fn apply_from_window(
         tray_menu_handles,
         window.get_copy_timestamp_enabled(),
         window.get_clipboard_history_enabled(),
+        window.get_screenshot_enabled(),
         window.get_text_translation_enabled(),
         window.get_zh_to_en_enabled(),
         &window.get_zh_to_en_model_dir(),
@@ -190,6 +208,7 @@ fn apply_settings_snapshot(
     tray_menu_handles: &TrayMenuHandles,
     copy_timestamp_enabled: bool,
     clipboard_history_enabled: bool,
+    screenshot_enabled: bool,
     text_translation_enabled: bool,
     zh_to_en_enabled: bool,
     zh_to_en_model_dir: &str,
@@ -212,6 +231,7 @@ fn apply_settings_snapshot(
         let mut settings = settings.lock().unwrap();
         settings.copy_timestamp.enabled = copy_timestamp_enabled;
         settings.clipboard_history.enabled = clipboard_history_enabled;
+        settings.screenshot.enabled = screenshot_enabled;
         settings.text_translation = new_text_translation;
         settings.clone()
     };

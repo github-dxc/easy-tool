@@ -6,6 +6,7 @@ export component TopImageWindow inherits Window {
     in-out property <image> image;
     in-out property <float> image_width: 1;
     in-out property <float> image_height: 1;
+    in property <length> shadow_padding: 8px;
 
     callback start_drag();
     callback drag();
@@ -30,42 +31,46 @@ export component TopImageWindow inherits Window {
                 reject
             }
         }
+    }
 
-        Rectangle {
-            width: root.image_width * 1px + 2px;
-            height: root.image_height * 1px + 2px;
-            background: transparent;
-            border-width: 1px;
-            border-color: #4C8BF5;
-            clip: true;
+    Rectangle {
+        x: root.shadow_padding;
+        y: root.shadow_padding;
+        width: root.image_width * 1px + 2px;
+        height: root.image_height * 1px + 2px;
+        background: transparent;
+        border-width: 1px;
+        border-color: #4C8BF5;
+        drop-shadow-blur: 8px;
+        drop-shadow-color: rgba(0,0,0,0.24);
+        clip: true;
 
-            Image {
-                x: 1px;
-                y: 1px;
-                width: root.image_width * 1px;
-                height: root.image_height * 1px;
-                source: root.image;
-                image-fit: fill;
-            }
+        Image {
+            x: 1px;
+            y: 1px;
+            width: root.image_width * 1px;
+            height: root.image_height * 1px;
+            source: root.image;
+            image-fit: fill;
+        }
 
-            TouchArea {
-                width: parent.width;
-                height: parent.height;
+        TouchArea {
+            width: parent.width;
+            height: parent.height;
 
-                pointer-event(event) => {
-                    if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
-                        keyboard_focus.focus();
-                        root.start_drag();
-                    }
-                    if (event.button == PointerEventButton.left && event.kind == PointerEventKind.up) {
-                        root.end_drag();
-                    }
-                    if (event.kind == PointerEventKind.move && self.pressed) {
-                        root.drag();
-                    }
-                    if (event.button == PointerEventButton.right && event.kind == PointerEventKind.down) {
-                        root.close_image();
-                    }
+            pointer-event(event) => {
+                if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
+                    keyboard_focus.focus();
+                    root.start_drag();
+                }
+                if (event.button == PointerEventButton.left && event.kind == PointerEventKind.up) {
+                    root.end_drag();
+                }
+                if (event.kind == PointerEventKind.move && self.pressed) {
+                    root.drag();
+                }
+                if (event.button == PointerEventButton.right && event.kind == PointerEventKind.up) {
+                    root.close_image();
                 }
             }
         }

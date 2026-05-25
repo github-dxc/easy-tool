@@ -7,12 +7,15 @@ use std::time::Duration;
 use image::RgbaImage;
 use slint::{CloseRequestResponse, ComponentHandle, Image, Rgba8Pixel, SharedPixelBuffer};
 
-use crate::{TopImageWindow};
+use crate::ScreenshotWindow;
+use crate::TopImageWindow;
+use crate::features::screenshot::window::show_screenshot_window;
 use crate::platform::window::{
-    cursor_position, hide_taskbar_icon, set_window_position, window_position
+    cursor_position, set_window_position, show_without_taskbar_icon, window_position,
 };
 
 const BORDER_WIDTH: u32 = 1;
+const SHADOW_PADDING: u32 = 8;
 
 thread_local! {
     static PINNED_IMAGE_WINDOWS: RefCell<Vec<PinnedImageWindow>> = const { RefCell::new(Vec::new()) };
@@ -36,6 +39,7 @@ pub fn open_pinned_image(
     image: RgbaImage,
     screen_x: i32,
     screen_y: i32,
+    screenshot_window: slint::Weak<ScreenshotWindow>,
 ) -> Result<(), String> {
     let image_width = image.width();
     let image_height = image.height();
@@ -43,32 +47,30 @@ pub fn open_pinned_image(
     let scale_factor = window.window().scale_factor().max(1.0);
     let logical_image_width = image_width as f32 / scale_factor;
     let logical_image_height = image_height as f32 / scale_factor;
-    let logical_window_width = logical_image_width + BORDER_WIDTH as f32 * 2.0;
-    let logical_window_height = logical_image_height + BORDER_WIDTH as f32 * 2.0;
-    let window_x = f64::from(screen_x - BORDER_WIDTH as i32);
-    let window_y = f64::from(screen_y - BORDER_WIDTH as i32);
+    let logical_window_width =
+        logical_image_width + BORDER_WIDTH as f32 * 2.0 + SHADOW_PADDING as f32 * 2.0;
+    let logical_window_height =
+        logical_image_height + BORDER_WIDTH as f32 * 2.0 + SHADOW_PADDING as f32 * 2.0;
+    let window_x = f64::from(screen_x - BORDER_WIDTH as i32 - SHADOW_PADDING as i32);
+    let window_y = f64::from(screen_y - BORDER_WIDTH as i32 - SHADOW_PADDING as i32);
 
     window.set_image(image_from_rgba(&image));
     window.set_image_width(logical_image_width);
     window.set_image_height(logical_image_height);
-    window
-        .window()
-        .set_size(slint::LogicalSize::new(
-            logical_window_width,
-            logical_window_height,
-        ));
+    window.window().set_size(slint::LogicalSize::new(
+        logical_window_width,
+        logical_window_height,
+    ));
 
     let id = next_window_id();
     bind_drag_callbacks(&window);
     bind_close_callbacks(&window, id);
+    bind_screenshot_shortcut(&window, screenshot_window);
 
-    window
-        .show()
-        .map_err(|err| format!("show top image failed: {err}"))?;
+    show_without_taskbar_icon(&window).map_err(|err| format!("show top image failed: {err}"))?;
     window.invoke_focus_keyboard();
     set_window_position(&window, window_x, window_y);
     schedule_position_fix(window.as_weak(), window_x, window_y);
-    hide_taskbar_icon(&window);
 
     PINNED_IMAGE_WINDOWS.with(|windows| {
         windows.borrow_mut().push(PinnedImageWindow {
@@ -107,9 +109,8 @@ pub fn restore_pinned_images_after_screenshot() {
     PINNED_IMAGE_WINDOWS.with(|windows| {
         for pinned in windows.borrow_mut().iter_mut() {
             if pinned.restore_after_screenshot {
-                let _ = pinned.window.show();
+                let _ = show_without_taskbar_icon(&pinned.window);
                 pinned.window.invoke_focus_keyboard();
-                hide_taskbar_icon(&pinned.window);
             }
             pinned.restore_after_screenshot = false;
         }
@@ -173,6 +174,18 @@ fn bind_close_callbacks(window: &TopImageWindow, id: u64) {
     window.window().on_close_requested(move || {
         close_pinned_image(id);
         CloseRequestResponse::HideWindow
+    });
+}
+
+fn bind_screenshot_shortcut(
+    window: &TopImageWindow,
+    screenshot_window: slint::Weak<ScreenshotWindow>,
+) {
+    window.on_screenshot_shortcut(move || {
+        let screenshot_window = screenshot_window.clone();
+        let _ = screenshot_window.upgrade_in_event_loop(|window| {
+            show_screenshot_window(&window);
+        });
     });
 }
 

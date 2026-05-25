@@ -3,12 +3,13 @@ import "../assets/font/AlibabaPuHuiTi-3-55-Regular.ttf";
 
 export component SettingsWindow inherits Window {
     width: 720px;
-    height: 520px;
+    height: 560px;
     title: "设置";
     default-font-family: "Alibaba PuHuiTi 3.0";
 
     in-out property <bool> copy_timestamp_enabled: true;
     in-out property <bool> clipboard_history_enabled: true;
+    in-out property <bool> screenshot_enabled: true;
     in-out property <bool> text_translation_enabled: false;
     in-out property <bool> zh_to_en_enabled: true;
     in-out property <string> zh_to_en_model_dir: "";
@@ -21,6 +22,7 @@ export component SettingsWindow inherits Window {
     callback apply_settings(
         copy_timestamp_enabled: bool,
         clipboard_history_enabled: bool,
+        screenshot_enabled: bool,
         text_translation_enabled: bool,
         zh_to_en_enabled: bool,
         zh_to_en_model_dir: string,
@@ -57,7 +59,7 @@ export component SettingsWindow inherits Window {
                         spacing: 16px;
 
                         Text {
-                            text: "显示时间戳 - ctrl+c";
+                            text: "显示时间戳 - Ctrl+C";
                             color: #223041;
                             font-size: 14px;
                             vertical-alignment: center;
@@ -68,15 +70,7 @@ export component SettingsWindow inherits Window {
                             checked <=> root.copy_timestamp_enabled;
                             text: self.checked ? "已开启" : "已关闭";
                             toggled => {
-                                root.apply_settings(
-                                    root.copy_timestamp_enabled,
-                                    root.clipboard_history_enabled,
-                                    root.text_translation_enabled,
-                                    root.zh_to_en_enabled,
-                                    root.zh_to_en_model_dir,
-                                    root.en_to_zh_model_dir,
-                                    root.text_translation_debounce_seconds
-                                );
+                                root.apply_settings(root.copy_timestamp_enabled, root.clipboard_history_enabled, root.screenshot_enabled, root.text_translation_enabled, root.zh_to_en_enabled, root.zh_to_en_model_dir, root.en_to_zh_model_dir, root.text_translation_debounce_seconds);
                             }
                         }
                     }
@@ -85,7 +79,7 @@ export component SettingsWindow inherits Window {
                         spacing: 16px;
 
                         Text {
-                            text: "复制历史 - ctrl+shift+c";
+                            text: "复制历史 - Ctrl+Shift+C";
                             color: #223041;
                             font-size: 14px;
                             vertical-alignment: center;
@@ -96,15 +90,7 @@ export component SettingsWindow inherits Window {
                             checked <=> root.clipboard_history_enabled;
                             text: self.checked ? "已开启" : "已关闭";
                             toggled => {
-                                root.apply_settings(
-                                    root.copy_timestamp_enabled,
-                                    root.clipboard_history_enabled,
-                                    root.text_translation_enabled,
-                                    root.zh_to_en_enabled,
-                                    root.zh_to_en_model_dir,
-                                    root.en_to_zh_model_dir,
-                                    root.text_translation_debounce_seconds
-                                );
+                                root.apply_settings(root.copy_timestamp_enabled, root.clipboard_history_enabled, root.screenshot_enabled, root.text_translation_enabled, root.zh_to_en_enabled, root.zh_to_en_model_dir, root.en_to_zh_model_dir, root.text_translation_debounce_seconds);
                             }
                         }
                     }
@@ -113,7 +99,27 @@ export component SettingsWindow inherits Window {
                         spacing: 16px;
 
                         Text {
-                            text: "翻译文本 - ctrl+c";
+                            text: "截图快捷键 - Alt+Shift+Z";
+                            color: #223041;
+                            font-size: 14px;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                        }
+
+                        Switch {
+                            checked <=> root.screenshot_enabled;
+                            text: self.checked ? "已开启" : "已关闭";
+                            toggled => {
+                                root.apply_settings(root.copy_timestamp_enabled, root.clipboard_history_enabled, root.screenshot_enabled, root.text_translation_enabled, root.zh_to_en_enabled, root.zh_to_en_model_dir, root.en_to_zh_model_dir, root.text_translation_debounce_seconds);
+                            }
+                        }
+                    }
+
+                    HorizontalLayout {
+                        spacing: 16px;
+
+                        Text {
+                            text: "文本翻译 - Ctrl+C";
                             color: #223041;
                             font-size: 14px;
                             vertical-alignment: center;
@@ -124,15 +130,7 @@ export component SettingsWindow inherits Window {
                             checked <=> root.text_translation_enabled;
                             text: self.checked ? "已开启" : "已关闭";
                             toggled => {
-                                root.apply_settings(
-                                    root.copy_timestamp_enabled,
-                                    root.clipboard_history_enabled,
-                                    root.text_translation_enabled,
-                                    root.zh_to_en_enabled,
-                                    root.zh_to_en_model_dir,
-                                    root.en_to_zh_model_dir,
-                                    root.text_translation_debounce_seconds
-                                );
+                                root.apply_settings(root.copy_timestamp_enabled, root.clipboard_history_enabled, root.screenshot_enabled, root.text_translation_enabled, root.zh_to_en_enabled, root.zh_to_en_model_dir, root.en_to_zh_model_dir, root.text_translation_debounce_seconds);
                             }
                         }
                     }
@@ -153,15 +151,7 @@ export component SettingsWindow inherits Window {
                             text: root.zh_to_en_enabled ? "中译英" : "英译中";
                             clicked => {
                                 root.zh_to_en_enabled = !root.zh_to_en_enabled;
-                                root.apply_settings(
-                                    root.copy_timestamp_enabled,
-                                    root.clipboard_history_enabled,
-                                    root.text_translation_enabled,
-                                    root.zh_to_en_enabled,
-                                    root.zh_to_en_model_dir,
-                                    root.en_to_zh_model_dir,
-                                    root.text_translation_debounce_seconds
-                                );
+                                root.apply_settings(root.copy_timestamp_enabled, root.clipboard_history_enabled, root.screenshot_enabled, root.text_translation_enabled, root.zh_to_en_enabled, root.zh_to_en_model_dir, root.en_to_zh_model_dir, root.text_translation_debounce_seconds);
                             }
                         }
                     }
@@ -181,23 +171,13 @@ export component SettingsWindow inherits Window {
                             text <=> root.text_translation_debounce_seconds;
                             placeholder-text: "默认 1";
                             edited(new_text) => {
-                                // 使用正则判断是否为纯数字
-                                // 如果不是数字，恢复成上一次的旧值
                                 if (new_text != "" && new_text.is-float()) {
-                                    root.apply_settings(
-                                        root.copy_timestamp_enabled,
-                                        root.clipboard_history_enabled,
-                                        root.text_translation_enabled,
-                                        root.zh_to_en_enabled,
-                                        root.zh_to_en_model_dir,
-                                        root.en_to_zh_model_dir,
-                                        root.text_translation_debounce_seconds
-                                    );
+                                    root.apply_settings(root.copy_timestamp_enabled, root.clipboard_history_enabled, root.screenshot_enabled, root.text_translation_enabled, root.zh_to_en_enabled, root.zh_to_en_model_dir, root.en_to_zh_model_dir, root.text_translation_debounce_seconds);
                                     root.last_valid_text_translation_debounce_seconds = new_text;
                                 } else {
                                     root.text_translation_debounce_seconds = root.last_valid_text_translation_debounce_seconds;
                                 }
-                            };
+                            }
                         }
                     }
                 }
@@ -282,7 +262,6 @@ export component SettingsWindow inherits Window {
                     }
                 }
             }
-
         }
     }
 }

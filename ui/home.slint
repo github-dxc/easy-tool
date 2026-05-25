@@ -6,7 +6,7 @@ component ToolTile inherits Rectangle {
     callback clicked;
 
     width: 78px;
-    height: 116px;
+    height: 108px;
     border-radius: 8px;
     border-width: 1px;
     border-color: touch.has-hover ? #A8C7FA : #DCE3EA;
@@ -19,22 +19,22 @@ component ToolTile inherits Rectangle {
     }
 
     Image {
-        width: 64px;
-        height: 64px;
+        width: 52px;
+        height: 52px;
         x: (parent.width - self.width) / 2;
-        y: 14px;
+        y: 12px;
         source: root.icon;
         image-fit: contain;
     }
 
     Text {
         width: parent.width;
-        height: 28px;
+        height: 34px;
         x: 0px;
-        y: 82px;
+        y: 68px;
         text: root.name;
         color: #1F2A33;
-        font-size: 13px;
+        font-size: 12px;
         font-weight: 700;
         horizontal-alignment: center;
         vertical-alignment: center;
@@ -68,7 +68,7 @@ component SettingsButton inherits Rectangle {
 
 export component HomeWindow inherits Window {
     width: 400px;
-    height: 300px;
+    height: 410px;
     title: "easy-tool";
     default-font-family: "Alibaba PuHuiTi 3.0";
 
@@ -83,7 +83,7 @@ export component HomeWindow inherits Window {
         background: #EEF2F6;
 
         VerticalLayout {
-            padding: 24px;
+            alignment: LayoutAlignment.center;
             spacing: 18px;
 
             Text {
@@ -94,57 +94,74 @@ export component HomeWindow inherits Window {
                 horizontal-alignment: center;
             }
 
-            Flickable {
-                viewport-height: tools.height;
+            Rectangle {
+                width: parent.width;
+                height: 232px;
+                background: transparent;
 
-                tools := Rectangle {
-                    width: parent.width;
-                    height: 116px;
+                menu_box := Rectangle {
+                    width: 336px;
+                    height: parent.height;
+                    x: (parent.width - self.width) / 2;
                     background: transparent;
 
-                    HorizontalLayout {
+                    VerticalLayout {
                         width: parent.width;
                         height: parent.height;
-                        spacing: 12px;
+                        spacing: 16px;
                         alignment: center;
 
-                        ToolTile {
-                            icon: @image-url("../assets/icons/timestamp.png");
-                            name: "时间戳转换";
-                            clicked => {
-                                root.open_time_trans();
+                        HorizontalLayout {
+                            width: parent.width;
+                            height: 108px;
+                            spacing: 8px;
+                            alignment: start;
+
+                            ToolTile {
+                                icon: @image-url("../assets/icons/timestamp.png");
+                                name: "时间转换";
+                                clicked => {
+                                    root.open_time_trans();
+                                }
+                            }
+
+                            ToolTile {
+                                icon: @image-url("../assets/icons/copy_history.png");
+                                name: "复制历史";
+                                clicked => {
+                                    root.open_clipboard_history();
+                                }
+                            }
+
+                            ToolTile {
+                                icon: @image-url("../assets/icons/translation.png");
+                                name: "文本翻译";
+                                clicked => {
+                                    root.open_text_translation();
+                                }
+                            }
+
+                            ToolTile {
+                                icon: @image-url("../assets/icons/file_preview.png");
+                                name: "文件预览";
+                                clicked => {
+                                    root.open_file_preview();
+                                }
                             }
                         }
 
-                        ToolTile {
-                            icon: @image-url("../assets/icons/copy_history.png");
-                            name: "复制历史";
-                            clicked => {
-                                root.open_clipboard_history();
-                            }
-                        }
+                        HorizontalLayout {
+                            width: parent.width;
+                            height: 108px;
+                            spacing: 8px;
+                            alignment: start;
 
-                        ToolTile {
-                            icon: @image-url("../assets/icons/translation.png");
-                            name: "文本翻译";
-                            clicked => {
-                                root.open_text_translation();
-                            }
-                        }
-
-                        ToolTile {
-                            icon: @image-url("../assets/icons/file_preview.png");
-                            name: "文件预览";
-                            clicked => {
-                                root.open_file_preview();
-                            }
-                        }
-
-                        ToolTile {
-                            icon: @image-url("../assets/icons/icon.png");
-                            name: "截图";
-                            clicked => {
-                                root.open_screenshot();
+                            ToolTile {
+                                icon: @image-url("../assets/icons/screenshot-32.png");
+                                name: "截图";
+                                clicked => {
+                                    root.open_screenshot();
+                                }
                             }
                         }
                     }

@@ -12,6 +12,8 @@ pub struct AppSettings {
     pub copy_timestamp: CopyTimestampSettings,
     #[serde(default = "default_enabled_clipboard_history")]
     pub clipboard_history: ClipboardHistorySettings,
+    #[serde(default = "default_enabled_screenshot")]
+    pub screenshot: ScreenshotSettings,
     #[serde(default)]
     pub text_translation: TextTranslationSettings,
 }
@@ -25,6 +27,12 @@ pub struct CopyTimestampSettings {
 /// Controls whether clipboard changes are captured into history.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClipboardHistorySettings {
+    pub enabled: bool,
+}
+
+/// Controls whether the global screenshot shortcut is enabled.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScreenshotSettings {
     pub enabled: bool,
 }
 
@@ -54,6 +62,7 @@ impl Default for AppSettings {
         Self {
             copy_timestamp: CopyTimestampSettings { enabled: true },
             clipboard_history: ClipboardHistorySettings { enabled: true },
+            screenshot: ScreenshotSettings { enabled: true },
             text_translation: TextTranslationSettings::default(),
         }
     }
@@ -65,6 +74,10 @@ fn default_enabled_copy_timestamp() -> CopyTimestampSettings {
 
 fn default_enabled_clipboard_history() -> ClipboardHistorySettings {
     ClipboardHistorySettings { enabled: true }
+}
+
+fn default_enabled_screenshot() -> ScreenshotSettings {
+    ScreenshotSettings { enabled: true }
 }
 
 impl Default for TextTranslationSettings {

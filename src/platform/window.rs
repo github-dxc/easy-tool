@@ -2,13 +2,18 @@
 
 #[cfg(target_os = "windows")]
 use std::cell::Cell;
+use std::time::Duration;
 
 use i_slint_backend_winit::WinitWindowAccessor;
+use log::info;
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use slint::ComponentHandle;
 use winit::dpi::PhysicalPosition;
 
 use crate::TimeTrans;
+
+const TASKBAR_HIDE_RETRY_DELAY: Duration = Duration::from_millis(16);
+const TASKBAR_HIDE_RETRY_ATTEMPTS: u8 = 10;
 
 #[cfg(target_os = "windows")]
 thread_local! {
@@ -71,17 +76,197 @@ pub fn display_size(time_window: &TimeTrans) -> Option<(f64, f64)> {
     (width > 0f64 && height > 0f64).then_some((width, height))
 }
 
-/// Marks any Slint window as a tool window so it stays out of the taskbar.
-pub fn hide_taskbar_icon(window: &impl ComponentHandle) {
+/// Shows a Slint window after marking it as a tool window when possible.
+pub fn show_without_taskbar_icon<T>(window: &T) -> Result<(), slint::PlatformError>
+where
+    T: ComponentHandle + 'static,
+{
+    let was_visible = window.window().is_visible();
+    let prepared = if was_visible {
+        false
+    } else {
+        hide_taskbar_icon(window)
+    };
+
+    let result = window.show();
+    if result.is_ok() {
+        let attempts = if prepared {
+            1
+        } else {
+            TASKBAR_HIDE_RETRY_ATTEMPTS
+        };
+        hide_taskbar_icon_when_ready(window.as_weak(), attempts);
+    }
+
+    result
+}
+
+/// Shows a tool-style Slint window that stays out of the taskbar and cannot be activated.
+pub fn show_without_taskbar_icon_or_activation<T>(window: &T) -> Result<(), slint::PlatformError>
+where
+    T: ComponentHandle + 'static,
+{
+    apply_taskbar_hidden_noactivate(window);
+
+    let result = window.show();
+    if result.is_ok() {
+        apply_taskbar_hidden_noactivate_when_ready(window.as_weak(), TASKBAR_HIDE_RETRY_ATTEMPTS);
+    }
+
+    result
+}
+
+fn apply_taskbar_hidden_noactivate_when_ready<T>(window: slint::Weak<T>, attempts_left: u8)
+where
+    T: ComponentHandle + 'static,
+{
+    slint::Timer::single_shot(TASKBAR_HIDE_RETRY_DELAY, move || {
+        let Some(window) = window.upgrade() else {
+            return;
+        };
+
+        if apply_taskbar_hidden_noactivate(&window) || attempts_left == 0 {
+            return;
+        }
+
+        apply_taskbar_hidden_noactivate_when_ready(window.as_weak(), attempts_left - 1);
+    });
+}
+
+fn apply_taskbar_hidden_noactivate(window: &impl ComponentHandle) -> bool {
+    let mut applied = false;
     window.window().with_winit_window(|winit_window| {
         if let Ok(handle) = winit_window.window_handle()
             && let RawWindowHandle::Win32(win32_handle) = handle.as_raw()
         {
             let hwnd = win32_handle.hwnd.get() as isize;
-            hide_hwnd_from_taskbar(hwnd);
+            apply_hwnd_taskbar_hidden_noactivate(hwnd);
+            applied = true;
         }
     });
+    applied
 }
+
+fn hide_taskbar_icon_when_ready<T>(window: slint::Weak<T>, attempts_left: u8)
+where
+    T: ComponentHandle + 'static,
+{
+    slint::Timer::single_shot(TASKBAR_HIDE_RETRY_DELAY, move || {
+        let Some(window) = window.upgrade() else {
+            return;
+        };
+
+        if hide_taskbar_icon(&window) || attempts_left == 0 {
+            return;
+        }
+
+        hide_taskbar_icon_when_ready(window.as_weak(), attempts_left - 1);
+    });
+}
+
+/// Marks any Slint window as a tool window so it stays out of the taskbar.
+pub fn hide_taskbar_icon(window: &impl ComponentHandle) -> bool {
+    let mut applied = false;
+    window.window().with_winit_window(|winit_window| {
+        if let Ok(handle) = winit_window.window_handle()
+            && let RawWindowHandle::Win32(win32_handle) = handle.as_raw()
+        {
+            let hwnd = win32_handle.hwnd.get() as isize;
+            disable_window_transitions(hwnd);
+            hide_hwnd_from_taskbar(hwnd);
+            applied = true;
+        }
+    });
+    applied
+}
+
+/// Prevents a Slint window from becoming the active foreground window on click.
+pub fn prevent_window_activation(window: &impl ComponentHandle) -> bool {
+    let mut applied = false;
+    window.window().with_winit_window(|winit_window| {
+        if let Ok(handle) = winit_window.window_handle()
+            && let RawWindowHandle::Win32(win32_handle) = handle.as_raw()
+        {
+            let hwnd = win32_handle.hwnd.get() as isize;
+            info!("prevent window activation requested: hwnd={hwnd:#x}");
+            prevent_hwnd_activation(hwnd);
+            applied = true;
+        }
+    });
+    applied
+}
+
+pub fn prevent_window_activation_when_ready<T>(window: slint::Weak<T>, attempts_left: u8)
+where
+    T: ComponentHandle + 'static,
+{
+    slint::Timer::single_shot(TASKBAR_HIDE_RETRY_DELAY, move || {
+        let Some(window) = window.upgrade() else {
+            return;
+        };
+
+        if prevent_window_activation(&window) || attempts_left == 0 {
+            return;
+        }
+
+        prevent_window_activation_when_ready(window.as_weak(), attempts_left - 1);
+    });
+}
+
+#[cfg(target_os = "windows")]
+fn disable_window_transitions(hwnd: isize) {
+    unsafe {
+        use windows_sys::Win32::Graphics::Dwm::{
+            DWMWA_TRANSITIONS_FORCEDISABLED, DwmSetWindowAttribute,
+        };
+
+        let disabled: i32 = 1;
+        let _ = DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_TRANSITIONS_FORCEDISABLED as u32,
+            std::ptr::addr_of!(disabled).cast(),
+            std::mem::size_of_val(&disabled) as u32,
+        );
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn disable_window_transitions(_hwnd: isize) {}
+
+#[cfg(target_os = "windows")]
+fn prevent_hwnd_activation(hwnd: isize) {
+    unsafe {
+        use windows_sys::Win32::UI::WindowsAndMessaging::*;
+
+        let old_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32;
+        let new_style = old_style | WS_EX_NOACTIVATE;
+        let was_visible = IsWindowVisible(hwnd) != 0;
+
+        if old_style != new_style {
+            SetWindowLongPtrW(hwnd, GWL_EXSTYLE, new_style as isize);
+        }
+
+        SetWindowPos(
+            hwnd,
+            0,
+            0,
+            0,
+            0,
+            0,
+            SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+        );
+
+        let applied_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32;
+        info!(
+            "prevent window activation applied: hwnd={hwnd:#x}, visible={}, old_style={old_style:#010x}, new_style={new_style:#010x}, applied_style={applied_style:#010x}, has_noactivate={}",
+            was_visible,
+            applied_style & WS_EX_NOACTIVATE != 0
+        );
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn prevent_hwnd_activation(_hwnd: isize) {}
 
 #[cfg(target_os = "windows")]
 fn hide_hwnd_from_taskbar(hwnd: isize) {
@@ -123,6 +308,58 @@ fn hide_hwnd_from_taskbar(hwnd: isize) {
 
 #[cfg(not(target_os = "windows"))]
 fn hide_hwnd_from_taskbar(_hwnd: isize) {}
+
+#[cfg(target_os = "windows")]
+fn apply_hwnd_taskbar_hidden_noactivate(hwnd: isize) {
+    unsafe {
+        use windows_sys::Win32::UI::WindowsAndMessaging::*;
+
+        disable_window_transitions(hwnd);
+
+        let old_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32;
+        let new_style = (old_style | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE) & !WS_EX_APPWINDOW;
+        let owner_hwnd = taskbar_owner_window();
+        let was_visible = IsWindowVisible(hwnd) != 0;
+
+        if was_visible {
+            ShowWindow(hwnd, SW_HIDE);
+        }
+
+        if owner_hwnd != 0 {
+            SetWindowLongPtrW(hwnd, GWLP_HWNDPARENT, owner_hwnd);
+        }
+
+        if old_style != new_style {
+            SetWindowLongPtrW(hwnd, GWL_EXSTYLE, new_style as isize);
+        }
+
+        SetWindowPos(
+            hwnd,
+            0,
+            0,
+            0,
+            0,
+            0,
+            SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+        );
+
+        if was_visible {
+            ShowWindow(hwnd, SW_SHOWNA);
+        }
+
+        let applied_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32;
+        info!(
+            "apply noactivate taskbar-hidden style: hwnd={hwnd:#x}, owner={owner_hwnd:#x}, visible={}, old_style={old_style:#010x}, new_style={new_style:#010x}, applied_style={applied_style:#010x}, has_noactivate={}, has_toolwindow={}, has_appwindow={}",
+            was_visible,
+            applied_style & WS_EX_NOACTIVATE != 0,
+            applied_style & WS_EX_TOOLWINDOW != 0,
+            applied_style & WS_EX_APPWINDOW != 0
+        );
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn apply_hwnd_taskbar_hidden_noactivate(_hwnd: isize) {}
 
 #[cfg(target_os = "windows")]
 fn taskbar_owner_window() -> isize {
