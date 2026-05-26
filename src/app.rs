@@ -15,6 +15,7 @@ use crate::features::clipboard_history::history::ClipboardHistory;
 use crate::features::clipboard_history::window::{
     init_clipboard_history_window, show_clipboard_history_window,
 };
+use crate::features::file_preview::ocr::OcrService;
 use crate::features::file_preview::registry::register_file_context_menu;
 use crate::features::file_preview::window::{init_file_preview_window, show_file_preview_window};
 use crate::features::home::window::{init_home_window, show_home_window};
@@ -39,7 +40,14 @@ use crate::settings::SettingsStore;
 pub fn run() {
     if let Some(path) = std::env::args_os().nth(1) {
         init_logging().expect("failed to initialize logging");
-        let file_preview_window = init_file_preview_window(true);
+        let settings_store = SettingsStore::new();
+        let settings = Arc::new(Mutex::new(
+            settings_store
+                .load_or_create()
+                .expect("failed to load settings"),
+        ));
+        let ocr_service = Arc::new(OcrService::new(&settings.lock().unwrap().image_recognition));
+        let file_preview_window = init_file_preview_window(true, Arc::clone(&ocr_service));
         show_file_preview_window(&file_preview_window, path.into());
         slint::run_event_loop_until_quit().unwrap();
         return;
@@ -71,6 +79,7 @@ pub fn run() {
     let translation_service = Arc::new(TranslationService::new(
         &settings.lock().unwrap().text_translation,
     ));
+    let ocr_service = Arc::new(OcrService::new(&settings.lock().unwrap().image_recognition));
     let text_translation_window = init_text_translation_window(
         Arc::clone(&translation_cancel_generation),
         Arc::clone(&settings),
@@ -83,13 +92,14 @@ pub fn run() {
         Arc::clone(&clipboard_history),
         Arc::clone(&suppress_shortcuts),
     );
-    let file_preview_window = init_file_preview_window(false);
+    let file_preview_window = init_file_preview_window(false, Arc::clone(&ocr_service));
     let screenshot_window = init_screenshot_window();
     let tray_state = init_tray_icon(&settings.lock().unwrap());
     let settings_window = init_settings_window(
         Arc::clone(&settings),
         settings_store.clone(),
         Arc::clone(&translation_service),
+        Arc::clone(&ocr_service),
         tray_state.menu_handles(),
     );
     let home_window = init_home_window(

@@ -10,23 +10,28 @@ export component SettingsWindow inherits Window {
     in-out property <bool> copy_timestamp_enabled: true;
     in-out property <bool> clipboard_history_enabled: true;
     in-out property <bool> screenshot_enabled: true;
+    in-out property <bool> image_recognition_enabled: true;
     in-out property <bool> text_translation_enabled: false;
     in-out property <bool> zh_to_en_enabled: true;
     in-out property <string> zh_to_en_model_dir: "";
     in-out property <string> en_to_zh_model_dir: "";
+    in-out property <string> image_recognition_model_dir: "";
     in-out property <string> text_translation_debounce_seconds: "1";
     in-out property <string> last_valid_text_translation_debounce_seconds: "1";
 
     callback browse_zh_to_en_model_dir();
     callback browse_en_to_zh_model_dir();
+    callback browse_image_recognition_model_dir();
     callback apply_settings(
         copy_timestamp_enabled: bool,
         clipboard_history_enabled: bool,
         screenshot_enabled: bool,
+        image_recognition_enabled: bool,
         text_translation_enabled: bool,
         zh_to_en_enabled: bool,
         zh_to_en_model_dir: string,
         en_to_zh_model_dir: string,
+        image_recognition_model_dir: string,
         text_translation_debounce_seconds: string
     );
     callback close_requested();
@@ -34,228 +39,289 @@ export component SettingsWindow inherits Window {
     Rectangle {
         background: #EEF3F8;
 
-        VerticalLayout {
-            padding: 24px;
-            spacing: 18px;
+        Flickable {
+            width: parent.width;
+            height: parent.height;
+            viewport-width: parent.width;
+            viewport-height: content.height;
 
-            Rectangle {
-                background: #FFFFFF;
-                border-radius: 12px;
-                border-width: 1px;
-                border-color: #D8E1EB;
-
-                VerticalLayout {
-                    padding: 18px;
-                    spacing: 14px;
-
-                    Text {
-                        text: "快捷键配置";
-                        color: #1A2430;
-                        font-size: 18px;
-                        font-weight: 800;
-                    }
-
-                    HorizontalLayout {
-                        spacing: 16px;
-
-                        Text {
-                            text: "显示时间戳 - Ctrl+C";
-                            color: #223041;
-                            font-size: 14px;
-                            vertical-alignment: center;
-                            horizontal-stretch: 1;
-                        }
-
-                        Switch {
-                            checked <=> root.copy_timestamp_enabled;
-                            text: self.checked ? "已开启" : "已关闭";
-                            toggled => {
-                                root.apply_settings(root.copy_timestamp_enabled, root.clipboard_history_enabled, root.screenshot_enabled, root.text_translation_enabled, root.zh_to_en_enabled, root.zh_to_en_model_dir, root.en_to_zh_model_dir, root.text_translation_debounce_seconds);
-                            }
-                        }
-                    }
-
-                    HorizontalLayout {
-                        spacing: 16px;
-
-                        Text {
-                            text: "复制历史 - Ctrl+Shift+C";
-                            color: #223041;
-                            font-size: 14px;
-                            vertical-alignment: center;
-                            horizontal-stretch: 1;
-                        }
-
-                        Switch {
-                            checked <=> root.clipboard_history_enabled;
-                            text: self.checked ? "已开启" : "已关闭";
-                            toggled => {
-                                root.apply_settings(root.copy_timestamp_enabled, root.clipboard_history_enabled, root.screenshot_enabled, root.text_translation_enabled, root.zh_to_en_enabled, root.zh_to_en_model_dir, root.en_to_zh_model_dir, root.text_translation_debounce_seconds);
-                            }
-                        }
-                    }
-
-                    HorizontalLayout {
-                        spacing: 16px;
-
-                        Text {
-                            text: "截图快捷键 - Alt+Shift+Z";
-                            color: #223041;
-                            font-size: 14px;
-                            vertical-alignment: center;
-                            horizontal-stretch: 1;
-                        }
-
-                        Switch {
-                            checked <=> root.screenshot_enabled;
-                            text: self.checked ? "已开启" : "已关闭";
-                            toggled => {
-                                root.apply_settings(root.copy_timestamp_enabled, root.clipboard_history_enabled, root.screenshot_enabled, root.text_translation_enabled, root.zh_to_en_enabled, root.zh_to_en_model_dir, root.en_to_zh_model_dir, root.text_translation_debounce_seconds);
-                            }
-                        }
-                    }
-
-                    HorizontalLayout {
-                        spacing: 16px;
-
-                        Text {
-                            text: "文本翻译 - Ctrl+C";
-                            color: #223041;
-                            font-size: 14px;
-                            vertical-alignment: center;
-                            horizontal-stretch: 1;
-                        }
-
-                        Switch {
-                            checked <=> root.text_translation_enabled;
-                            text: self.checked ? "已开启" : "已关闭";
-                            toggled => {
-                                root.apply_settings(root.copy_timestamp_enabled, root.clipboard_history_enabled, root.screenshot_enabled, root.text_translation_enabled, root.zh_to_en_enabled, root.zh_to_en_model_dir, root.en_to_zh_model_dir, root.text_translation_debounce_seconds);
-                            }
-                        }
-                    }
-
-                    HorizontalLayout {
-                        spacing: 16px;
-
-                        Text {
-                            text: "默认转换方向";
-                            color: #223041;
-                            font-size: 14px;
-                            vertical-alignment: center;
-                            horizontal-stretch: 1;
-                        }
-
-                        Button {
-                            width: 132px;
-                            text: root.zh_to_en_enabled ? "中译英" : "英译中";
-                            clicked => {
-                                root.zh_to_en_enabled = !root.zh_to_en_enabled;
-                                root.apply_settings(root.copy_timestamp_enabled, root.clipboard_history_enabled, root.screenshot_enabled, root.text_translation_enabled, root.zh_to_en_enabled, root.zh_to_en_model_dir, root.en_to_zh_model_dir, root.text_translation_debounce_seconds);
-                            }
-                        }
-                    }
-
-                    HorizontalLayout {
-                        spacing: 16px;
-
-                        Text {
-                            text: "翻译防抖时间（秒）";
-                            color: #223041;
-                            font-size: 14px;
-                            vertical-alignment: center;
-                            horizontal-stretch: 1;
-                        }
-
-                        LineEdit {
-                            text <=> root.text_translation_debounce_seconds;
-                            placeholder-text: "默认 1";
-                            edited(new_text) => {
-                                if (new_text != "" && new_text.is-float()) {
-                                    root.apply_settings(root.copy_timestamp_enabled, root.clipboard_history_enabled, root.screenshot_enabled, root.text_translation_enabled, root.zh_to_en_enabled, root.zh_to_en_model_dir, root.en_to_zh_model_dir, root.text_translation_debounce_seconds);
-                                    root.last_valid_text_translation_debounce_seconds = new_text;
-                                } else {
-                                    root.text_translation_debounce_seconds = root.last_valid_text_translation_debounce_seconds;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            Rectangle {
-                background: #FFFFFF;
-                border-radius: 12px;
-                border-width: 1px;
-                border-color: #D8E1EB;
-                vertical-stretch: 1;
+            content := Rectangle {
+                width: parent.width;
+                height: 760px;
 
                 VerticalLayout {
-                    padding: 18px;
+                    padding: 24px;
                     spacing: 18px;
 
-                    Text {
-                        text: "文本转换模型目录";
-                        color: #1A2430;
-                        font-size: 18px;
-                        font-weight: 800;
-                    }
+                    Rectangle {
+                        background: #FFFFFF;
+                        border-radius: 12px;
+                        border-width: 1px;
+                        border-color: #D8E1EB;
 
-                    VerticalLayout {
-                        spacing: 8px;
+                        VerticalLayout {
+                            padding: 18px;
+                            spacing: 14px;
 
-                        Text {
-                            text: "中译英模型目录";
-                            color: #223041;
-                            font-size: 14px;
-                            font-weight: 700;
-                        }
-
-                        HorizontalLayout {
-                            spacing: 10px;
-
-                            LineEdit {
-                                text <=> root.zh_to_en_model_dir;
-                                read-only: true;
-                                placeholder-text: "请选择模型文件夹";
-                                horizontal-stretch: 1;
+                            Text {
+                                text: "快捷键配置";
+                                color: #1A2430;
+                                font-size: 18px;
+                                font-weight: 800;
                             }
 
-                            Button {
-                                width: 88px;
-                                text: "打开";
-                                clicked => {
-                                    root.browse_zh_to_en_model_dir();
+                            HorizontalLayout {
+                                spacing: 16px;
+
+                                Text {
+                                    text: "显示时间戳 - Ctrl+C";
+                                    color: #223041;
+                                    font-size: 14px;
+                                    vertical-alignment: center;
+                                    horizontal-stretch: 1;
+                                }
+
+                                Switch {
+                                    checked <=> root.copy_timestamp_enabled;
+                                    text: self.checked ? "已开启" : "已关闭";
+                                    toggled => {
+                                        root.apply_settings(root.copy_timestamp_enabled, root.clipboard_history_enabled, root.screenshot_enabled, root.image_recognition_enabled, root.text_translation_enabled, root.zh_to_en_enabled, root.zh_to_en_model_dir, root.en_to_zh_model_dir, root.image_recognition_model_dir, root.text_translation_debounce_seconds);
+                                    }
+                                }
+                            }
+
+                            HorizontalLayout {
+                                spacing: 16px;
+
+                                Text {
+                                    text: "复制历史 - Ctrl+Shift+C";
+                                    color: #223041;
+                                    font-size: 14px;
+                                    vertical-alignment: center;
+                                    horizontal-stretch: 1;
+                                }
+
+                                Switch {
+                                    checked <=> root.clipboard_history_enabled;
+                                    text: self.checked ? "已开启" : "已关闭";
+                                    toggled => {
+                                        root.apply_settings(root.copy_timestamp_enabled, root.clipboard_history_enabled, root.screenshot_enabled, root.image_recognition_enabled, root.text_translation_enabled, root.zh_to_en_enabled, root.zh_to_en_model_dir, root.en_to_zh_model_dir, root.image_recognition_model_dir, root.text_translation_debounce_seconds);
+                                    }
+                                }
+                            }
+
+                            HorizontalLayout {
+                                spacing: 16px;
+
+                                Text {
+                                    text: "截图快捷键 - Alt+Shift+Z";
+                                    color: #223041;
+                                    font-size: 14px;
+                                    vertical-alignment: center;
+                                    horizontal-stretch: 1;
+                                }
+
+                                Switch {
+                                    checked <=> root.screenshot_enabled;
+                                    text: self.checked ? "已开启" : "已关闭";
+                                    toggled => {
+                                        root.apply_settings(root.copy_timestamp_enabled, root.clipboard_history_enabled, root.screenshot_enabled, root.image_recognition_enabled, root.text_translation_enabled, root.zh_to_en_enabled, root.zh_to_en_model_dir, root.en_to_zh_model_dir, root.image_recognition_model_dir, root.text_translation_debounce_seconds);
+                                    }
+                                }
+                            }
+
+                            HorizontalLayout {
+                                spacing: 16px;
+
+                                Text {
+                                    text: "图像识别";
+                                    color: #223041;
+                                    font-size: 14px;
+                                    vertical-alignment: center;
+                                    horizontal-stretch: 1;
+                                }
+
+                                Switch {
+                                    checked <=> root.image_recognition_enabled;
+                                    text: self.checked ? "已开启" : "已关闭";
+                                    toggled => {
+                                        root.apply_settings(root.copy_timestamp_enabled, root.clipboard_history_enabled, root.screenshot_enabled, root.image_recognition_enabled, root.text_translation_enabled, root.zh_to_en_enabled, root.zh_to_en_model_dir, root.en_to_zh_model_dir, root.image_recognition_model_dir, root.text_translation_debounce_seconds);
+                                    }
+                                }
+                            }
+
+                            HorizontalLayout {
+                                spacing: 16px;
+
+                                Text {
+                                    text: "文本翻译 - Ctrl+C";
+                                    color: #223041;
+                                    font-size: 14px;
+                                    vertical-alignment: center;
+                                    horizontal-stretch: 1;
+                                }
+
+                                Switch {
+                                    checked <=> root.text_translation_enabled;
+                                    text: self.checked ? "已开启" : "已关闭";
+                                    toggled => {
+                                        root.apply_settings(root.copy_timestamp_enabled, root.clipboard_history_enabled, root.screenshot_enabled, root.image_recognition_enabled, root.text_translation_enabled, root.zh_to_en_enabled, root.zh_to_en_model_dir, root.en_to_zh_model_dir, root.image_recognition_model_dir, root.text_translation_debounce_seconds);
+                                    }
+                                }
+                            }
+
+                            HorizontalLayout {
+                                spacing: 16px;
+
+                                Text {
+                                    text: "默认转换方向";
+                                    color: #223041;
+                                    font-size: 14px;
+                                    vertical-alignment: center;
+                                    horizontal-stretch: 1;
+                                }
+
+                                Button {
+                                    width: 132px;
+                                    text: root.zh_to_en_enabled ? "中译英" : "英译中";
+                                    clicked => {
+                                        root.zh_to_en_enabled = !root.zh_to_en_enabled;
+                                        root.apply_settings(root.copy_timestamp_enabled, root.clipboard_history_enabled, root.screenshot_enabled, root.image_recognition_enabled, root.text_translation_enabled, root.zh_to_en_enabled, root.zh_to_en_model_dir, root.en_to_zh_model_dir, root.image_recognition_model_dir, root.text_translation_debounce_seconds);
+                                    }
+                                }
+                            }
+
+                            HorizontalLayout {
+                                spacing: 16px;
+
+                                Text {
+                                    text: "翻译防抖时间（秒）";
+                                    color: #223041;
+                                    font-size: 14px;
+                                    vertical-alignment: center;
+                                    horizontal-stretch: 1;
+                                }
+
+                                LineEdit {
+                                    text <=> root.text_translation_debounce_seconds;
+                                    placeholder-text: "默认 1";
+                                    edited(new_text) => {
+                                        if (new_text != "" && new_text.is-float()) {
+                                            root.apply_settings(root.copy_timestamp_enabled, root.clipboard_history_enabled, root.screenshot_enabled, root.image_recognition_enabled, root.text_translation_enabled, root.zh_to_en_enabled, root.zh_to_en_model_dir, root.en_to_zh_model_dir, root.image_recognition_model_dir, root.text_translation_debounce_seconds);
+                                            root.last_valid_text_translation_debounce_seconds = new_text;
+                                        } else {
+                                            root.text_translation_debounce_seconds = root.last_valid_text_translation_debounce_seconds;
+                                        }
+                                    }
                                 }
                             }
                         }
                     }
+                    Rectangle {
+                        background: #FFFFFF;
+                        border-radius: 12px;
+                        border-width: 1px;
+                        border-color: #D8E1EB;
+                        vertical-stretch: 1;
 
-                    VerticalLayout {
-                        spacing: 8px;
+                        VerticalLayout {
+                            padding: 18px;
+                            spacing: 18px;
 
-                        Text {
-                            text: "英译中模型目录";
-                            color: #223041;
-                            font-size: 14px;
-                            font-weight: 700;
-                        }
-
-                        HorizontalLayout {
-                            spacing: 10px;
-
-                            LineEdit {
-                                text <=> root.en_to_zh_model_dir;
-                                read-only: true;
-                                placeholder-text: "请选择模型文件夹";
-                                horizontal-stretch: 1;
+                            Text {
+                                text: "文本转换模型目录";
+                                color: #1A2430;
+                                font-size: 18px;
+                                font-weight: 800;
                             }
 
-                            Button {
-                                width: 88px;
-                                text: "打开";
-                                clicked => {
-                                    root.browse_en_to_zh_model_dir();
+                            VerticalLayout {
+                                spacing: 8px;
+
+                                Text {
+                                    text: "中译英模型目录";
+                                    color: #223041;
+                                    font-size: 14px;
+                                    font-weight: 700;
+                                }
+
+                                HorizontalLayout {
+                                    spacing: 10px;
+
+                                    LineEdit {
+                                        text <=> root.zh_to_en_model_dir;
+                                        read-only: true;
+                                        placeholder-text: "请选择模型文件夹";
+                                        horizontal-stretch: 1;
+                                    }
+
+                                    Button {
+                                        width: 88px;
+                                        text: "打开";
+                                        clicked => {
+                                            root.browse_zh_to_en_model_dir();
+                                        }
+                                    }
+                                }
+                            }
+
+                            VerticalLayout {
+                                spacing: 8px;
+
+                                Text {
+                                    text: "英译中模型目录";
+                                    color: #223041;
+                                    font-size: 14px;
+                                    font-weight: 700;
+                                }
+
+                                HorizontalLayout {
+                                    spacing: 10px;
+
+                                    LineEdit {
+                                        text <=> root.en_to_zh_model_dir;
+                                        read-only: true;
+                                        placeholder-text: "请选择模型文件夹";
+                                        horizontal-stretch: 1;
+                                    }
+
+                                    Button {
+                                        width: 88px;
+                                        text: "打开";
+                                        clicked => {
+                                            root.browse_en_to_zh_model_dir();
+                                        }
+                                    }
+                                }
+                            }
+
+                            VerticalLayout {
+                                spacing: 8px;
+
+                                Text {
+                                    text: "图像识别模型目录";
+                                    color: #223041;
+                                    font-size: 14px;
+                                    font-weight: 700;
+                                }
+
+                                HorizontalLayout {
+                                    spacing: 10px;
+
+                                    LineEdit {
+                                        text <=> root.image_recognition_model_dir;
+                                        read-only: true;
+                                        placeholder-text: "请选择模型文件夹";
+                                        horizontal-stretch: 1;
+                                    }
+
+                                    Button {
+                                        width: 88px;
+                                        text: "打开";
+                                        clicked => {
+                                            root.browse_image_recognition_model_dir();
+                                        }
+                                    }
                                 }
                             }
                         }

@@ -6,9 +6,9 @@ use std::time::Duration;
 
 use slint::{CloseRequestResponse, ComponentHandle, Timer, TimerMode};
 
+use crate::TextTranslationWindow;
 use crate::features::text_translation::translator::TranslationService;
 use crate::settings::AppSettings;
-use crate::TextTranslationWindow;
 
 /// Builds the text translation result window.
 pub fn init_text_translation_window(

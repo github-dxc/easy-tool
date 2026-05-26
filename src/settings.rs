@@ -16,6 +16,8 @@ pub struct AppSettings {
     pub screenshot: ScreenshotSettings,
     #[serde(default)]
     pub text_translation: TextTranslationSettings,
+    #[serde(default = "default_enabled_image_recognition")]
+    pub image_recognition: ImageRecognitionSettings,
 }
 
 /// Controls whether copied timestamps show the floating conversion window.
@@ -34,6 +36,14 @@ pub struct ClipboardHistorySettings {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScreenshotSettings {
     pub enabled: bool,
+}
+
+/// Controls image text recognition and model loading.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImageRecognitionSettings {
+    pub enabled: bool,
+    #[serde(default)]
+    pub model_dir: Option<PathBuf>,
 }
 
 /// Controls copy-triggered text translation and model loading.
@@ -64,6 +74,7 @@ impl Default for AppSettings {
             clipboard_history: ClipboardHistorySettings { enabled: true },
             screenshot: ScreenshotSettings { enabled: true },
             text_translation: TextTranslationSettings::default(),
+            image_recognition: ImageRecognitionSettings::default(),
         }
     }
 }
@@ -78,6 +89,22 @@ fn default_enabled_clipboard_history() -> ClipboardHistorySettings {
 
 fn default_enabled_screenshot() -> ScreenshotSettings {
     ScreenshotSettings { enabled: true }
+}
+
+fn default_enabled_image_recognition() -> ImageRecognitionSettings {
+    ImageRecognitionSettings {
+        enabled: true,
+        model_dir: None,
+    }
+}
+
+impl Default for ImageRecognitionSettings {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            model_dir: None,
+        }
+    }
 }
 
 impl Default for TextTranslationSettings {
@@ -99,6 +126,14 @@ fn default_text_translation_debounce_seconds() -> u64 {
 impl Default for TranslationDirection {
     fn default() -> Self {
         Self::ZhToEn
+    }
+}
+
+impl ImageRecognitionSettings {
+    pub fn model_path(&self) -> PathBuf {
+        self.model_dir
+            .clone()
+            .unwrap_or_else(default_image_recognition_model_path)
     }
 }
 
@@ -186,4 +221,10 @@ fn default_en_to_zh_translation_model_path() -> PathBuf {
         .join("resource")
         .join("Xenova")
         .join("opus-mt-en-zh")
+}
+
+fn default_image_recognition_model_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("resource")
+        .join("image-recognition")
 }

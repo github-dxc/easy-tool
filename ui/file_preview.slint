@@ -4,21 +4,23 @@ import "../assets/font/AlibabaPuHuiTi-3-55-Regular.ttf";
 export component FilePreviewWindow inherits Window {
     width: 820px;
     height: 620px;
-    title: root.file_name != "" ? root.file_name : "文件预览";
+    title: root.file_name != "" ? root.file_name : "图片预览";
     default-font-family: "Alibaba PuHuiTi 3.0";
 
     in-out property <string> file_path: "";
     in-out property <string> file_name: "";
     in-out property <string> status_text: "";
-    in-out property <string> text_content: "";
     in-out property <image> image_content;
-    in-out property <bool> is_image: false;
     in-out property <bool> has_content: false;
     in-out property <int> image_width: 0;
     in-out property <int> image_height: 0;
+    in-out property <bool> ocr_panel_visible: false;
+    in-out property <string> ocr_text: "";
+    in-out property <string> ocr_status_text: "";
 
     callback close_preview();
     callback open_file();
+    callback toggle_ocr_panel();
 
     Rectangle {
         background: #F6F7F9;
@@ -27,68 +29,123 @@ export component FilePreviewWindow inherits Window {
             padding: 14px;
             spacing: 10px;
 
-            Rectangle {
-                background: #FFFFFF;
-                border-color: #D9DDE3;
-                border-width: 1px;
-                border-radius: 6px;
-                clip: true;
+            HorizontalLayout {
+                spacing: 8px;
+                vertical-stretch: 1;
 
-                if !root.has_content: VerticalLayout {
-                    alignment: center;
-                    spacing: 12px;
+                Rectangle {
+                    background: #FFFFFF;
+                    border-color: #D9DDE3;
+                    border-width: 1px;
+                    border-radius: 6px;
+                    clip: true;
+                    horizontal-stretch: 1;
+                    vertical-stretch: 1;
 
-                    HorizontalLayout {
-                        spacing: 0px;
+                    if !root.has_content: VerticalLayout {
+                        alignment: center;
+                        spacing: 12px;
 
-                        Rectangle {
-                            horizontal-stretch: 1;
-                            background: transparent;
-                        }
+                        HorizontalLayout {
+                            spacing: 0px;
 
-                        Button {
-                            width: 96px;
-                            height: 32px;
-                            text: "Open";
-                            clicked => {
-                                root.open_file();
+                            Rectangle {
+                                horizontal-stretch: 1;
+                                background: transparent;
+                            }
+
+                            Button {
+                                width: 96px;
+                                height: 32px;
+                                text: "Open";
+                                clicked => {
+                                    root.open_file();
+                                }
+                            }
+
+                            Rectangle {
+                                horizontal-stretch: 1;
+                                background: transparent;
                             }
                         }
 
-                        Rectangle {
-                            horizontal-stretch: 1;
-                            background: transparent;
+                        Text {
+                            text: root.status_text;
+                            color: #6B7280;
+                            font-size: 14px;
+                            horizontal-alignment: center;
                         }
                     }
 
-                    Text {
-                        text: root.status_text;
-                        color: #6B7280;
-                        font-size: 14px;
-                        horizontal-alignment: center;
+                    if root.has_content: Rectangle {
+                        background: #ECEFF3;
+
+                        Image {
+                            width: parent.width;
+                            height: parent.height;
+                            source: root.image_content;
+                            image-fit: contain;
+                        }
+                    }
+
+                }
+
+                if root.has_content: Rectangle {
+                    width: 34px;
+                    vertical-stretch: 1;
+                    background: tab_area.has-hover ? #E9EEF5 : #FFFFFF;
+                    border-color: root.ocr_panel_visible ? #7EA7D8 : #D9DDE3;
+                    border-width: 1px;
+                    border-radius: 6px;
+
+                    tab_area := TouchArea {
+                        clicked => {
+                            root.toggle_ocr_panel();
+                        }
+                    }
+
+                    VerticalLayout {
+                        padding: 6px;
+                        spacing: 8px;
+                        alignment: center;
+
+                        Text {
+                            text: root.ocr_panel_visible ? "<" : ">";
+                            color: #345A85;
+                            font-size: 18px;
+                            font-weight: 700;
+                            horizontal-alignment: center;
+                        }
                     }
                 }
 
-                if root.has_content && root.is_image: Rectangle {
-                    background: #ECEFF3;
+                if root.has_content && root.ocr_panel_visible: Rectangle {
+                    width: 320px;
+                    background: #FFFFFF;
+                    border-color: #D9DDE3;
+                    border-width: 1px;
+                    border-radius: 6px;
+                    clip: true;
 
-                    Image {
-                        width: root.image_width * 1px;
-                        height: root.image_height * 1px;
-                        x: (parent.width - self.width) / 2;
-                        y: (parent.height - self.height) / 2;
-                        source: root.image_content;
-                        image-fit: contain;
+                    VerticalLayout {
+                        padding: 10px;
+                        spacing: 8px;
+
+                        Text {
+                            text: root.ocr_status_text;
+                            color: #4B5563;
+                            font-size: 13px;
+                        }
+
+                        TextEdit {
+                            horizontal-stretch: 1;
+                            vertical-stretch: 1;
+                            read-only: true;
+                            wrap: word-wrap;
+                            font-size: 14px;
+                            text: root.ocr_text;
+                        }
                     }
-                }
-
-                if root.has_content && !root.is_image: TextEdit {
-                    width: parent.width;
-                    height: parent.height;
-                    read-only: true;
-                    wrap: word-wrap;
-                    font-size: 14px;
-                    text: root.text_content;
                 }
             }
         }

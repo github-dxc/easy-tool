@@ -32,6 +32,38 @@ pub fn set_window_position(window: &impl ComponentHandle, x: f64, y: f64) {
     });
 }
 
+/// Allows the native window frame to be maximized and resized.
+pub fn make_window_resizable(window: &impl ComponentHandle) {
+    window.window().with_winit_window(|winit_window| {
+        winit_window.set_resizable(true);
+
+        #[cfg(target_os = "windows")]
+        if let Ok(handle) = winit_window.window_handle()
+            && let RawWindowHandle::Win32(win32_handle) = handle.as_raw()
+        {
+            let hwnd = win32_handle.hwnd.get() as isize;
+            enable_hwnd_resize_and_maximize(hwnd);
+        }
+    });
+}
+
+/// Re-applies resizable/maximize styles after the native window has been created.
+pub fn make_window_resizable_when_ready<T>(window: slint::Weak<T>, attempts_left: u8)
+where
+    T: ComponentHandle + 'static,
+{
+    slint::Timer::single_shot(TASKBAR_HIDE_RETRY_DELAY, move || {
+        let Some(window) = window.upgrade() else {
+            return;
+        };
+
+        make_window_resizable(&window);
+        if attempts_left > 0 {
+            make_window_resizable_when_ready(window.as_weak(), attempts_left - 1);
+        }
+    });
+}
+
 /// Returns the outer position of a Slint window in physical screen coordinates.
 pub fn window_position(window: &impl ComponentHandle) -> Option<(f64, f64)> {
     let mut position = None;
@@ -74,6 +106,29 @@ pub fn display_size(time_window: &TimeTrans) -> Option<(f64, f64)> {
     });
 
     (width > 0f64 && height > 0f64).then_some((width, height))
+}
+
+#[cfg(target_os = "windows")]
+fn enable_hwnd_resize_and_maximize(hwnd: isize) {
+    unsafe {
+        use windows_sys::Win32::UI::WindowsAndMessaging::*;
+
+        let old_style = GetWindowLongPtrW(hwnd, GWL_STYLE) as u32;
+        let new_style = old_style | WS_MAXIMIZEBOX | WS_THICKFRAME;
+
+        if old_style != new_style {
+            SetWindowLongPtrW(hwnd, GWL_STYLE, new_style as isize);
+            SetWindowPos(
+                hwnd,
+                0,
+                0,
+                0,
+                0,
+                0,
+                SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+            );
+        }
+    }
 }
 
 /// Shows a Slint window after marking it as a tool window when possible.
