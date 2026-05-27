@@ -129,7 +129,7 @@ impl ClipboardHistoryItem {
         }
     }
 
-    fn same_content(&self, other: &Self) -> bool {
+    pub(crate) fn same_content(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::Text { text: left }, Self::Text { text: right }) => left == right,
             (

@@ -20,6 +20,7 @@ use crate::{ClipboardHistoryRow, ClipboardHistoryWindow};
 pub fn init_clipboard_history_window(
     history: Arc<Mutex<ClipboardHistory>>,
     suppress_shortcuts: Arc<AtomicBool>,
+    suppress_next_clipboard_history: Arc<Mutex<Option<ClipboardHistoryItem>>>,
 ) -> ClipboardHistoryWindow {
     let window = ClipboardHistoryWindow::new().unwrap();
 
@@ -35,7 +36,9 @@ pub fn init_clipboard_history_window(
     window.on_paste(move |index| {
         let item = history_for_paste.lock().unwrap().get(index as usize);
         if let Some(item) = item {
+            *suppress_next_clipboard_history.lock().unwrap() = Some(item.clone());
             if let Err(err) = put_clipboard_item(&item) {
+                suppress_next_clipboard_history.lock().unwrap().take();
                 log::error!("paste history item failed: {err}");
                 return;
             }

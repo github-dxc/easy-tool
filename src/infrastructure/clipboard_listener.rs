@@ -10,7 +10,7 @@ use slint::ComponentHandle;
 
 use crate::ClipboardHistoryWindow;
 use crate::features::clipboard_history::clipboard::capture_clipboard_item;
-use crate::features::clipboard_history::history::ClipboardHistory;
+use crate::features::clipboard_history::history::{ClipboardHistory, ClipboardHistoryItem};
 use crate::features::clipboard_history::window::refresh_clipboard_history_window;
 use crate::settings::AppSettings;
 
@@ -19,6 +19,7 @@ pub fn start_clipboard_history_listener(
     history: Arc<Mutex<ClipboardHistory>>,
     settings: Arc<Mutex<AppSettings>>,
     history_window: slint::Weak<ClipboardHistoryWindow>,
+    suppress_next_clipboard_history: Arc<Mutex<Option<ClipboardHistoryItem>>>,
 ) -> Result<(), String> {
     thread::Builder::new()
         .name("clipboard-master-listener".into())
@@ -27,6 +28,7 @@ pub fn start_clipboard_history_listener(
                 history,
                 settings,
                 history_window,
+                suppress_next_clipboard_history,
             };
 
             let mut master = match Master::new(handler) {
@@ -51,6 +53,7 @@ struct HistoryClipboardHandler {
     history: Arc<Mutex<ClipboardHistory>>,
     settings: Arc<Mutex<AppSettings>>,
     history_window: slint::Weak<ClipboardHistoryWindow>,
+    suppress_next_clipboard_history: Arc<Mutex<Option<ClipboardHistoryItem>>>,
 }
 
 impl ClipboardHandler for HistoryClipboardHandler {
@@ -65,6 +68,16 @@ impl ClipboardHandler for HistoryClipboardHandler {
         let Some(item) = capture_clipboard_item() else {
             return CallbackResult::Next;
         };
+
+        if self
+            .suppress_next_clipboard_history
+            .lock()
+            .unwrap()
+            .take()
+            .is_some_and(|expected| expected.same_content(&item))
+        {
+            return CallbackResult::Next;
+        }
 
         self.history.lock().unwrap().push(item);
 

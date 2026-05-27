@@ -88,9 +88,11 @@ pub fn run() {
     let weak_translation_window = text_translation_window.as_weak();
     let clipboard_history = Arc::new(Mutex::new(ClipboardHistory::default()));
     let suppress_shortcuts = Arc::new(AtomicBool::new(false));
+    let suppress_next_clipboard_history = Arc::new(Mutex::new(None));
     let clipboard_history_window = init_clipboard_history_window(
         Arc::clone(&clipboard_history),
         Arc::clone(&suppress_shortcuts),
+        Arc::clone(&suppress_next_clipboard_history),
     );
     let file_preview_window = init_file_preview_window(false, Arc::clone(&ocr_service));
     let screenshot_window = init_screenshot_window();
@@ -118,6 +120,7 @@ pub fn run() {
         Arc::clone(&clipboard_history),
         Arc::clone(&settings),
         weak_history_window.clone(),
+        Arc::clone(&suppress_next_clipboard_history),
     )
     .expect("failed to start clipboard history listener");
 
