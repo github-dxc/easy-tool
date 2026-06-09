@@ -1,14 +1,14 @@
 //! In-memory clipboard history model and display helpers.
 
 use std::collections::VecDeque;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use arboard::ImageData;
 
 const MAX_HISTORY_ITEMS: usize = 20;
 
 /// One clipboard entry captured by the history listener.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum ClipboardHistoryItem {
     Text {
         text: String,
@@ -16,7 +16,8 @@ pub enum ClipboardHistoryItem {
     Image {
         width: usize,
         height: usize,
-        bytes: Vec<u8>,
+        path: PathBuf,
+        byte_len: u64,
     },
     Files {
         paths: Vec<PathBuf>,
@@ -30,19 +31,17 @@ pub struct ClipboardHistory {
 }
 
 impl ClipboardHistory {
-    pub fn push(&mut self, item: ClipboardHistoryItem) {
+    pub fn push(&mut self, item: ClipboardHistoryItem) -> Vec<PathBuf> {
         if self
             .items
             .front()
             .is_some_and(|latest| latest.same_content(&item))
         {
-            return;
+            return Vec::new();
         }
 
         self.items.push_front(item);
-        while self.items.len() > MAX_HISTORY_ITEMS {
-            self.items.pop_back();
-        }
+        self.trim_to_limit()
     }
 
     pub fn get(&self, index: usize) -> Option<ClipboardHistoryItem> {
@@ -55,6 +54,30 @@ impl ClipboardHistory {
 
     pub fn items(&self) -> Vec<ClipboardHistoryItem> {
         self.items.iter().cloned().collect()
+    }
+
+    pub fn retain_valid_images(&mut self) -> Vec<PathBuf> {
+        let mut removed = Vec::new();
+        self.items.retain(|item| match item {
+            ClipboardHistoryItem::Image { path, .. } if !path.exists() => {
+                removed.push(path.clone());
+                false
+            }
+            _ => true,
+        });
+        removed
+    }
+
+    pub fn trim_to_limit(&mut self) -> Vec<PathBuf> {
+        let mut removed = Vec::new();
+        while self.items.len() > MAX_HISTORY_ITEMS {
+            if let Some(item) = self.items.pop_back() {
+                if let Some(path) = item.image_path() {
+                    removed.push(path.to_path_buf());
+                }
+            }
+        }
+        removed
     }
 }
 
@@ -81,11 +104,12 @@ impl ClipboardHistoryItem {
             Self::Image {
                 width,
                 height,
-                bytes,
+                byte_len,
+                ..
             } => {
                 format!(
                     "RGBA 图片，{} KB，原始尺寸 {width} x {height}",
-                    bytes.len() / 1024
+                    byte_len / 1024
                 )
             }
             Self::Files { paths } => paths
@@ -113,17 +137,25 @@ impl ClipboardHistoryItem {
         }
     }
 
+    pub fn image_path(&self) -> Option<&Path> {
+        match self {
+            Self::Image { path, .. } => Some(path.as_path()),
+            _ => None,
+        }
+    }
+
     /// Converts stored image bytes back into clipboard/image preview data.
     pub fn image_data(&self) -> Option<ImageData<'static>> {
         match self {
             Self::Image {
                 width,
                 height,
-                bytes,
+                path,
+                ..
             } => Some(ImageData {
                 width: *width,
                 height: *height,
-                bytes: bytes.clone().into(),
+                bytes: image::open(path).ok()?.into_rgba8().into_raw().into(),
             }),
             _ => None,
         }
@@ -136,17 +168,20 @@ impl ClipboardHistoryItem {
                 Self::Image {
                     width: left_width,
                     height: left_height,
-                    bytes: left_bytes,
+                    path: left_path,
+                    byte_len: left_byte_len,
                 },
                 Self::Image {
                     width: right_width,
                     height: right_height,
-                    bytes: right_bytes,
+                    path: right_path,
+                    byte_len: right_byte_len,
                 },
             ) => {
                 left_width == right_width
                     && left_height == right_height
-                    && left_bytes == right_bytes
+                    && left_byte_len == right_byte_len
+                    && left_path == right_path
             }
             (Self::Files { paths: left }, Self::Files { paths: right }) => left == right,
             _ => false,
@@ -161,4 +196,112 @@ fn summarize_text(text: &str, max_chars: usize) -> String {
         summary.push_str("...");
     }
     summary
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ClipboardHistory, ClipboardHistoryItem};
+    use std::collections::VecDeque;
+    use tempfile::tempdir;
+
+    #[test]
+    fn push_returns_evicted_image_paths_when_history_exceeds_limit() {
+        let dir = tempdir().unwrap();
+        let image_path = dir.path().join("oldest.png");
+        std::fs::write(&image_path, b"png").unwrap();
+        let mut history = ClipboardHistory::default();
+        history.push(ClipboardHistoryItem::Image {
+            width: 1,
+            height: 1,
+            path: image_path.clone(),
+            byte_len: 3,
+        });
+        for index in 0..19 {
+            history.push(ClipboardHistoryItem::Text {
+                text: format!("entry {index}"),
+            });
+        }
+
+        let evicted = history.push(ClipboardHistoryItem::Text {
+            text: "newest".to_string(),
+        });
+
+        assert_eq!(evicted, vec![image_path]);
+        assert_eq!(history.items().len(), 20);
+    }
+
+    #[test]
+    fn push_duplicate_front_keeps_existing_item_and_returns_no_evictions() {
+        let path = std::path::PathBuf::from("image.png");
+        let mut history = ClipboardHistory::default();
+        let item = ClipboardHistoryItem::Image {
+            width: 2,
+            height: 2,
+            path,
+            byte_len: 16,
+        };
+        history.push(item.clone());
+
+        let evicted = history.push(item);
+
+        assert!(evicted.is_empty());
+        assert_eq!(history.items().len(), 1);
+    }
+
+    #[test]
+    fn retain_valid_images_drops_missing_image_entries_and_returns_paths() {
+        let dir = tempdir().unwrap();
+        let existing = dir.path().join("existing.png");
+        let missing = dir.path().join("missing.png");
+        std::fs::write(&existing, b"png").unwrap();
+        let mut history = ClipboardHistory::default();
+        history.push(ClipboardHistoryItem::Image {
+            width: 1,
+            height: 1,
+            path: existing.clone(),
+            byte_len: 3,
+        });
+        history.push(ClipboardHistoryItem::Image {
+            width: 1,
+            height: 1,
+            path: missing.clone(),
+            byte_len: 3,
+        });
+
+        let removed = history.retain_valid_images();
+
+        assert_eq!(removed, vec![missing]);
+        assert_eq!(history.items().len(), 1);
+        assert_eq!(
+            history
+                .get(0)
+                .and_then(|item| item.image_path().map(ToOwned::to_owned)),
+            Some(existing)
+        );
+    }
+
+    #[test]
+    fn trim_to_limit_returns_evicted_image_paths() {
+        let dir = tempdir().unwrap();
+        let image_path = dir.path().join("oldest.png");
+        std::fs::write(&image_path, b"png").unwrap();
+        let mut items = VecDeque::new();
+        items.push_back(ClipboardHistoryItem::Image {
+            width: 1,
+            height: 1,
+            path: image_path.clone(),
+            byte_len: 3,
+        });
+        for index in 0..20 {
+            items.push_front(ClipboardHistoryItem::Text {
+                text: format!("entry {index}"),
+            });
+        }
+        let mut history = ClipboardHistory { items };
+
+        let evicted = history.trim_to_limit();
+
+        assert_eq!(evicted, vec![image_path]);
+        assert_eq!(history.items().len(), 20);
+    }
 }

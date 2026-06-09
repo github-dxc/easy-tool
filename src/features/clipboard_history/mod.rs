@@ -2,4 +2,5 @@
 
 pub mod clipboard;
 pub mod history;
+pub mod store;
 pub mod window;
