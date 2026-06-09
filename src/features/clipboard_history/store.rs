@@ -1,5 +1,6 @@
 //! Disk-backed clipboard history storage.
 
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -60,8 +61,7 @@ pub fn save_history(dir: &Path, history: &ClipboardHistory) -> Result<(), String
     };
     let content = serde_json::to_string_pretty(&persisted)
         .map_err(|err| format!("serialize history failed: {err}"))?;
-    std::fs::write(history_index_path(dir), content)
-        .map_err(|err| format!("write history failed: {err}"))
+    write_index_atomically(dir, &content)
 }
 
 pub fn item_from_capture(
@@ -79,14 +79,89 @@ pub fn item_from_capture(
     }
 }
 
-pub fn delete_image_files(paths: impl IntoIterator<Item = PathBuf>) {
+pub fn delete_image_files(dir: &Path, paths: impl IntoIterator<Item = PathBuf>) {
     for path in paths {
-        if let Err(err) = std::fs::remove_file(&path) {
+        let Some(file_name) = path.file_name() else {
+            continue;
+        };
+        if !is_generated_clipboard_image_path(&path) {
+            continue;
+        }
+
+        let path = dir.join(file_name);
+        if let Err(err) = std::fs::remove_file(path) {
             if err.kind() != std::io::ErrorKind::NotFound {
                 log::error!("delete clipboard image failed: {err}");
             }
         }
     }
+}
+
+fn is_generated_clipboard_image_path(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|file_name| file_name.to_str())
+        .is_some_and(|file_name| file_name.starts_with("clipboard-image-"))
+        && path.extension().and_then(|extension| extension.to_str()) == Some("png")
+}
+
+fn write_index_atomically(dir: &Path, content: &str) -> Result<(), String> {
+    std::fs::create_dir_all(dir).map_err(|err| format!("create history dir failed: {err}"))?;
+    let index_path = history_index_path(dir);
+    let temp_path = next_index_temp_path(dir)?;
+
+    let write_result = (|| -> Result<(), String> {
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temp_path)
+            .map_err(|err| format!("create temporary history index failed: {err}"))?;
+        file.write_all(content.as_bytes())
+            .map_err(|err| format!("write temporary history index failed: {err}"))?;
+        file.sync_all()
+            .map_err(|err| format!("sync temporary history index failed: {err}"))
+    })();
+
+    if let Err(err) = write_result {
+        let _ = std::fs::remove_file(&temp_path);
+        return Err(err);
+    }
+
+    match std::fs::rename(&temp_path, &index_path) {
+        Ok(()) => Ok(()),
+        Err(_) if index_path.exists() => {
+            if let Err(remove_err) = std::fs::remove_file(&index_path) {
+                if remove_err.kind() != std::io::ErrorKind::NotFound {
+                    let _ = std::fs::remove_file(&temp_path);
+                    return Err(format!("replace history index failed: {remove_err}"));
+                }
+            }
+            std::fs::rename(&temp_path, &index_path).map_err(|err| {
+                let _ = std::fs::remove_file(&temp_path);
+                format!("replace history index failed: {err}")
+            })
+        }
+        Err(err) => {
+            let _ = std::fs::remove_file(&temp_path);
+            Err(format!("replace history index failed: {err}"))
+        }
+    }
+}
+
+fn next_index_temp_path(dir: &Path) -> Result<PathBuf, String> {
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|err| format!("read system time failed: {err}"))?
+        .as_nanos();
+    for counter in 0..1000u16 {
+        let path = dir.join(format!(
+            "{HISTORY_INDEX_FILE}.tmp-{}-{timestamp}-{counter}",
+            std::process::id()
+        ));
+        if !path.exists() {
+            return Ok(path);
+        }
+    }
+    Err("could not allocate temporary history index path".to_string())
 }
 
 fn persist_image_capture(
@@ -136,7 +211,7 @@ fn next_image_path(dir: &Path) -> Result<PathBuf, String> {
 mod tests {
     use super::{
         CapturedClipboardItem, delete_image_files, history_index_path, item_from_capture,
-        load_history, save_history,
+        load_history, save_history, write_index_atomically,
     };
     use crate::features::clipboard_history::history::{ClipboardHistory, ClipboardHistoryItem};
     use tempfile::tempdir;
@@ -172,6 +247,32 @@ mod tests {
             loaded.get(1),
             Some(ClipboardHistoryItem::Text { text }) if text == "older"
         ));
+    }
+
+    #[test]
+    fn write_index_atomically_replaces_existing_index() {
+        let dir = tempdir().unwrap();
+        let index_path = history_index_path(dir.path());
+        std::fs::create_dir_all(dir.path()).unwrap();
+        std::fs::write(&index_path, r#"{"entries":[{"Text":{"text":"old"}}]}"#).unwrap();
+
+        write_index_atomically(dir.path(), r#"{"entries":[]}"#).unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(index_path).unwrap(),
+            r#"{"entries":[]}"#
+        );
+        let temp_files = std::fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_str()
+                    .is_some_and(|name| name.starts_with("clipboard_history.json."))
+            })
+            .count();
+        assert_eq!(temp_files, 0);
     }
 
     #[test]
@@ -237,11 +338,34 @@ mod tests {
     #[test]
     fn delete_image_files_removes_existing_files() {
         let dir = tempdir().unwrap();
+        let path = dir.path().join("clipboard-image-1-0.png");
+        std::fs::write(&path, b"png").unwrap();
+
+        delete_image_files(dir.path(), vec![path.clone()]);
+
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn delete_image_files_ignores_outside_paths_with_generated_names() {
+        let dir = tempdir().unwrap();
+        let outside = tempdir().unwrap();
+        let outside_path = outside.path().join("clipboard-image-1-0.png");
+        std::fs::write(&outside_path, b"png").unwrap();
+
+        delete_image_files(dir.path(), vec![outside_path.clone()]);
+
+        assert!(outside_path.exists());
+    }
+
+    #[test]
+    fn delete_image_files_ignores_non_generated_names_inside_history_dir() {
+        let dir = tempdir().unwrap();
         let path = dir.path().join("image.png");
         std::fs::write(&path, b"png").unwrap();
 
-        delete_image_files(vec![path.clone()]);
+        delete_image_files(dir.path(), vec![path.clone()]);
 
-        assert!(!path.exists());
+        assert!(path.exists());
     }
 }

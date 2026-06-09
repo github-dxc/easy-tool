@@ -177,15 +177,47 @@ impl ClipboardHistoryItem {
                     path: right_path,
                     byte_len: right_byte_len,
                 },
-            ) => {
-                left_width == right_width
-                    && left_height == right_height
-                    && left_byte_len == right_byte_len
-                    && left_path == right_path
-            }
+            ) => same_image_content(
+                *left_width,
+                *left_height,
+                left_path,
+                *left_byte_len,
+                *right_width,
+                *right_height,
+                right_path,
+                *right_byte_len,
+            ),
             (Self::Files { paths: left }, Self::Files { paths: right }) => left == right,
             _ => false,
         }
+    }
+}
+
+fn same_image_content(
+    left_width: usize,
+    left_height: usize,
+    left_path: &Path,
+    left_byte_len: u64,
+    right_width: usize,
+    right_height: usize,
+    right_path: &Path,
+    right_byte_len: u64,
+) -> bool {
+    if left_width != right_width || left_height != right_height || left_byte_len != right_byte_len {
+        return false;
+    }
+
+    if left_path == right_path {
+        return true;
+    }
+
+    if !left_path.exists() || !right_path.exists() {
+        return false;
+    }
+
+    match (std::fs::read(left_path), std::fs::read(right_path)) {
+        (Ok(left), Ok(right)) => left == right,
+        _ => false,
     }
 }
 
@@ -246,6 +278,39 @@ mod tests {
 
         assert!(evicted.is_empty());
         assert_eq!(history.items().len(), 1);
+    }
+
+    #[test]
+    fn push_dedupes_image_entries_with_identical_persisted_bytes() {
+        let dir = tempdir().unwrap();
+        let first_path = dir.path().join("clipboard-image-1-0.png");
+        let second_path = dir.path().join("clipboard-image-1-1.png");
+        let bytes = b"same image bytes";
+        std::fs::write(&first_path, bytes).unwrap();
+        std::fs::write(&second_path, bytes).unwrap();
+        let mut history = ClipboardHistory::default();
+        history.push(ClipboardHistoryItem::Image {
+            width: 2,
+            height: 2,
+            path: first_path.clone(),
+            byte_len: bytes.len() as u64,
+        });
+
+        let evicted = history.push(ClipboardHistoryItem::Image {
+            width: 2,
+            height: 2,
+            path: second_path,
+            byte_len: bytes.len() as u64,
+        });
+
+        assert!(evicted.is_empty());
+        assert_eq!(history.items().len(), 1);
+        assert_eq!(
+            history
+                .get(0)
+                .and_then(|item| item.image_path().map(ToOwned::to_owned)),
+            Some(first_path)
+        );
     }
 
     #[test]
