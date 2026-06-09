@@ -80,15 +80,17 @@ pub fn item_from_capture(
 }
 
 pub fn delete_image_files(dir: &Path, paths: impl IntoIterator<Item = PathBuf>) {
+    let Ok(history_dir) = dir.canonicalize() else {
+        return;
+    };
+
     for path in paths {
-        let Some(file_name) = path.file_name() else {
-            continue;
-        };
         if !is_generated_clipboard_image_path(&path) {
             continue;
         }
-
-        let path = dir.join(file_name);
+        if !is_existing_path_inside_dir(&history_dir, &path) {
+            continue;
+        }
         if let Err(err) = std::fs::remove_file(path) {
             if err.kind() != std::io::ErrorKind::NotFound {
                 log::error!("delete clipboard image failed: {err}");
@@ -102,6 +104,11 @@ fn is_generated_clipboard_image_path(path: &Path) -> bool {
         .and_then(|file_name| file_name.to_str())
         .is_some_and(|file_name| file_name.starts_with("clipboard-image-"))
         && path.extension().and_then(|extension| extension.to_str()) == Some("png")
+}
+
+fn is_existing_path_inside_dir(canonical_dir: &Path, path: &Path) -> bool {
+    path.canonicalize()
+        .is_ok_and(|candidate| candidate.starts_with(canonical_dir))
 }
 
 fn write_index_atomically(dir: &Path, content: &str) -> Result<(), String> {
@@ -355,6 +362,26 @@ mod tests {
 
         delete_image_files(dir.path(), vec![outside_path.clone()]);
 
+        assert!(outside_path.exists());
+    }
+
+    #[test]
+    fn delete_image_files_ignores_outside_paths_even_when_filename_collides() {
+        let dir = tempdir().unwrap();
+        let outside = tempdir().unwrap();
+        let inside_path = dir.path().join("clipboard-image-1-0.png");
+        let outside_path = outside.path().join("clipboard-image-1-0.png");
+        std::fs::write(&inside_path, b"inside").unwrap();
+        std::fs::write(&outside_path, b"outside").unwrap();
+
+        delete_image_files(dir.path(), vec![outside_path.clone()]);
+
+        assert!(inside_path.exists());
+        assert!(outside_path.exists());
+
+        delete_image_files(dir.path(), vec![inside_path.clone()]);
+
+        assert!(!inside_path.exists());
         assert!(outside_path.exists());
     }
 

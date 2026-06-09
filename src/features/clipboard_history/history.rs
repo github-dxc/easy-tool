@@ -31,13 +31,20 @@ pub struct ClipboardHistory {
 }
 
 impl ClipboardHistory {
+    /// Inserts a newest item and returns image paths that should be deleted.
+    ///
+    /// Returned paths may come from evicted old entries or from a discarded
+    /// duplicate image item that was already persisted before dedupe.
     pub fn push(&mut self, item: ClipboardHistoryItem) -> Vec<PathBuf> {
         if self
             .items
             .front()
             .is_some_and(|latest| latest.same_content(&item))
         {
-            return Vec::new();
+            return item
+                .image_path()
+                .map(|path| vec![path.to_path_buf()])
+                .unwrap_or_default();
         }
 
         self.items.push_front(item);
@@ -263,14 +270,10 @@ mod tests {
     }
 
     #[test]
-    fn push_duplicate_front_keeps_existing_item_and_returns_no_evictions() {
-        let path = std::path::PathBuf::from("image.png");
+    fn push_duplicate_text_front_keeps_existing_item_and_returns_no_cleanup_paths() {
         let mut history = ClipboardHistory::default();
-        let item = ClipboardHistoryItem::Image {
-            width: 2,
-            height: 2,
-            path,
-            byte_len: 16,
+        let item = ClipboardHistoryItem::Text {
+            text: "same".to_string(),
         };
         history.push(item.clone());
 
@@ -281,7 +284,7 @@ mod tests {
     }
 
     #[test]
-    fn push_dedupes_image_entries_with_identical_persisted_bytes() {
+    fn push_duplicate_image_returns_discarded_image_path_for_cleanup() {
         let dir = tempdir().unwrap();
         let first_path = dir.path().join("clipboard-image-1-0.png");
         let second_path = dir.path().join("clipboard-image-1-1.png");
@@ -299,11 +302,11 @@ mod tests {
         let evicted = history.push(ClipboardHistoryItem::Image {
             width: 2,
             height: 2,
-            path: second_path,
+            path: second_path.clone(),
             byte_len: bytes.len() as u64,
         });
 
-        assert!(evicted.is_empty());
+        assert_eq!(evicted, vec![second_path]);
         assert_eq!(history.items().len(), 1);
         assert_eq!(
             history
