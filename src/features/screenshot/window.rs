@@ -24,6 +24,9 @@ use crate::platform::window::{
 };
 use crate::{BrushSegment, ScreenshotWindow};
 
+const MAX_UNDO_SNAPSHOTS: usize = 8;
+const MAX_UNDO_BYTES: usize = 64 * 1024 * 1024;
+
 #[derive(Clone)]
 struct ScreenshotSession {
     bounds: ScreenBounds,
@@ -187,10 +190,22 @@ fn finish_screenshot_window(window: &ScreenshotWindow, restore_pinned_images: bo
     SCREENSHOT_SESSION.with(|store| {
         *store.borrow_mut() = None;
     });
+    clear_screenshot_window_state(window);
     if restore_pinned_images {
         restore_pinned_images_after_screenshot();
     }
     let _ = window.hide();
+}
+
+fn clear_screenshot_window_state(window: &ScreenshotWindow) {
+    window.set_screenshot(Image::default());
+    window.set_text_preview(Image::default());
+    window.set_has_text_preview(false);
+    window.set_text_editor_visible(false);
+    window.set_text_editor_value("".into());
+    window.set_brush_segments(ModelRc::from(Rc::new(VecModel::from(
+        Vec::<BrushSegment>::new(),
+    ))));
 }
 
 /// Captures the desktop and shows a full-screen selection overlay.
@@ -472,8 +487,25 @@ fn preview_text(
 
 fn push_undo_snapshot(session: &mut ScreenshotSession) {
     session.undo_stack.push(session.image.clone());
-    if session.undo_stack.len() > 20 {
-        session.undo_stack.remove(0);
+    trim_undo_stack(&mut session.undo_stack);
+}
+
+fn image_byte_len(image: &RgbaImage) -> usize {
+    image.as_raw().len()
+}
+
+fn undo_stack_byte_len(stack: &[RgbaImage]) -> usize {
+    stack.iter().map(image_byte_len).sum()
+}
+
+fn trim_undo_stack(stack: &mut Vec<RgbaImage>) {
+    while stack.len() > MAX_UNDO_SNAPSHOTS
+        || stack.len() > 1 && undo_stack_byte_len(stack) > MAX_UNDO_BYTES
+    {
+        if stack.len() <= 1 {
+            break;
+        }
+        stack.remove(0);
     }
 }
 
@@ -883,4 +915,46 @@ fn capture_screen() -> Result<ScreenshotSession, String> {
 #[cfg(not(target_os = "windows"))]
 fn capture_screen() -> Result<ScreenshotSession, String> {
     Err("screenshot capture is currently implemented only on Windows".into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{MAX_UNDO_BYTES, MAX_UNDO_SNAPSHOTS, trim_undo_stack, undo_stack_byte_len};
+    use image::RgbaImage;
+
+    #[test]
+    fn trim_undo_stack_limits_snapshot_count() {
+        let mut stack = (0..MAX_UNDO_SNAPSHOTS + 2)
+            .map(|_| RgbaImage::new(1, 1))
+            .collect::<Vec<_>>();
+
+        trim_undo_stack(&mut stack);
+
+        assert_eq!(stack.len(), MAX_UNDO_SNAPSHOTS);
+    }
+
+    #[test]
+    fn trim_undo_stack_limits_total_bytes() {
+        let side = 3000;
+        let mut stack = vec![
+            RgbaImage::new(1, 1),
+            RgbaImage::new(side, side),
+            RgbaImage::new(side, side),
+        ];
+
+        trim_undo_stack(&mut stack);
+
+        assert!(undo_stack_byte_len(&stack) <= MAX_UNDO_BYTES);
+    }
+
+    #[test]
+    fn trim_undo_stack_keeps_one_large_snapshot() {
+        let side = 5000;
+        let mut stack = vec![RgbaImage::new(side, side)];
+
+        trim_undo_stack(&mut stack);
+
+        assert_eq!(stack.len(), 1);
+        assert!(undo_stack_byte_len(&stack) > MAX_UNDO_BYTES);
+    }
 }

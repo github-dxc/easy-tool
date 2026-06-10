@@ -70,16 +70,9 @@ pub fn show_file_preview_window(window: &FilePreviewWindow, path: PathBuf) {
 
 /// Opens the preview window in an empty state for launchers such as the home page.
 pub fn show_empty_file_preview_window(window: &FilePreviewWindow) {
-    window.set_file_path("".into());
+    clear_preview_state(window);
     window.set_file_name("图片预览".into());
     window.set_status_text("暂无图片内容".into());
-    window.set_image_content(Image::default());
-    window.set_has_content(false);
-    window.set_image_width(0);
-    window.set_image_height(0);
-    window.set_ocr_panel_visible(false);
-    window.set_ocr_text("".into());
-    window.set_ocr_status_text("".into());
     let _ = window.show();
     make_window_resizable_when_ready(window.as_weak(), 5);
 }
@@ -225,6 +218,21 @@ fn close_preview_window(window: &slint::Weak<FilePreviewWindow>, quit_on_close: 
     }
 
     if let Some(ui) = window.upgrade() {
+        clear_preview_state(&ui);
         let _ = ui.hide();
     }
+}
+
+fn clear_preview_state(window: &FilePreviewWindow) {
+    window.set_file_path("".into());
+    window.set_file_name("".into());
+    window.set_status_text("".into());
+    window.set_image_content(Image::default());
+    window.set_has_content(false);
+    window.set_image_width(0);
+    window.set_image_height(0);
+    window.set_ocr_panel_visible(false);
+    window.set_ocr_text("".into());
+    window.set_ocr_status_text("".into());
+    OCR_GENERATION.fetch_add(1, Ordering::SeqCst);
 }
