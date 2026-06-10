@@ -185,7 +185,7 @@ export component SettingsWindow inherits Window {
 
                                 Switch {
                                     checked <=> root.tencent_backend_enabled;
-                                    text: self.checked ? "腾讯API" : "本地模型";
+                                    text: self.checked ? "本地模型" : "腾讯API";
                                     toggled => {
                                         root.apply_settings(root.copy_timestamp_enabled, root.clipboard_history_enabled, root.screenshot_enabled, root.image_recognition_enabled, root.text_translation_enabled, root.tencent_backend_enabled, root.tencent_secret_id, root.tencent_secret_key, root.image_recognition_model_dir, root.text_translation_debounce_seconds);
                                     }

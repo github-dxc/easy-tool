@@ -54,8 +54,8 @@ pub struct ImageRecognitionSettings {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum AiBackend {
-    #[default]
     Local,
+    #[default]
     Tencent,
 }
 
@@ -245,7 +245,7 @@ debounce_seconds = 3
         )
         .expect("settings should deserialize without backend fields");
 
-        assert_eq!(settings.ai_backend, AiBackend::Local);
+        assert_eq!(settings.ai_backend, AiBackend::Tencent);
         assert_eq!(settings.tencent_cloud.secret_id, "");
         assert_eq!(settings.tencent_cloud.secret_key, "");
     }

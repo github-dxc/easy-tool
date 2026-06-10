@@ -182,7 +182,7 @@ pub fn show_settings_window(window: &SettingsWindow, settings: &AppSettings) {
     window.set_screenshot_enabled(settings.screenshot.enabled);
     window.set_image_recognition_enabled(settings.image_recognition.enabled);
     window.set_text_translation_enabled(settings.text_translation.enabled);
-    window.set_tencent_backend_enabled(settings.ai_backend == AiBackend::Tencent);
+    window.set_tencent_backend_enabled(settings.ai_backend == AiBackend::Local);
     window.set_tencent_secret_id(settings.tencent_cloud.secret_id.clone().into());
     window.set_tencent_secret_key(settings.tencent_cloud.secret_key.clone().into());
     window.set_image_recognition_model_dir(
@@ -301,9 +301,9 @@ fn apply_settings_snapshot(
     text_translation_debounce_seconds: &str,
 ) {
     let ai_backend = if tencent_backend_enabled {
-        AiBackend::Tencent
-    } else {
         AiBackend::Local
+    } else {
+        AiBackend::Tencent
     };
     let tencent_cloud = TencentCloudSettings {
         secret_id: tencent_secret_id.trim().to_string(),
