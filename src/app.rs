@@ -1,5 +1,7 @@
 //! Application bootstrap and cross-feature event wiring.
 
+use std::cell::RefCell;
+use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -12,32 +14,69 @@ use single_instance::SingleInstance;
 use slint::ComponentHandle;
 
 use crate::config::APP_INSTANCE_ID;
-use crate::features::clipboard_history::history::ClipboardHistory;
+use crate::features::clipboard_history::history::{ClipboardHistory, ClipboardHistoryItem};
 use crate::features::clipboard_history::store::load_history;
 use crate::features::clipboard_history::window::{
     init_clipboard_history_window, show_clipboard_history_window,
 };
 use crate::features::file_preview::ocr::OcrService;
 use crate::features::file_preview::registry::register_file_context_menu;
-use crate::features::file_preview::window::{init_file_preview_window, show_file_preview_window};
+use crate::features::file_preview::window::{
+    init_file_preview_window, show_empty_file_preview_window, show_file_preview_window,
+};
 use crate::features::home::window::{init_home_window, show_home_window};
 use crate::features::screenshot::window::{
     cancel_screenshot_window, init_screenshot_window, show_screenshot_window,
 };
-use crate::features::settings::window::init_settings_window;
+use crate::features::settings::window::{init_settings_window, show_settings_window};
 use crate::features::text_translation::translator::TranslationService;
 use crate::features::text_translation::window::{
-    init_text_translation_window, trigger_translation,
+    init_text_translation_window, show_translation_pending, trigger_translation,
 };
 use crate::features::time_trans::window::init_time_trans_window;
 use crate::infrastructure::clipboard_listener::start_clipboard_history_listener;
 use crate::infrastructure::global_input::start_global_input_listener;
 use crate::infrastructure::logging::init_logging;
 use crate::infrastructure::paths::clipboard_history_dir;
-use crate::infrastructure::tray::{init_tray_icon, start_tray_event_pump};
+use crate::infrastructure::tray::{TrayMenuHandles, init_tray_icon, start_tray_event_pump};
 use crate::platform::dialog::show_message_box;
-use crate::platform::window::{display_size, set_position};
-use crate::settings::SettingsStore;
+use crate::platform::window::{
+    activate_slint_window, display_size, set_position, show_without_taskbar_icon,
+};
+use crate::settings::{AppSettings, SettingsStore};
+
+thread_local! {
+    static UI_APP_WINDOWS: RefCell<Option<Rc<RefCell<AppWindows>>>> = const { RefCell::new(None) };
+}
+
+#[derive(Default)]
+struct AppWindows {
+    time_trans: Option<crate::TimeTrans>,
+    history: Option<crate::ClipboardHistoryWindow>,
+    translation: Option<crate::TextTranslationWindow>,
+    file_preview: Option<crate::FilePreviewWindow>,
+    screenshot: Option<crate::ScreenshotWindow>,
+    settings: Option<crate::SettingsWindow>,
+}
+
+#[derive(Clone)]
+struct ShortcutWindows {
+    history: Arc<Mutex<Option<slint::Weak<crate::ClipboardHistoryWindow>>>>,
+    screenshot: Arc<Mutex<Option<slint::Weak<crate::ScreenshotWindow>>>>,
+    translation: Arc<Mutex<Option<slint::Weak<crate::TextTranslationWindow>>>>,
+    time_trans: Arc<Mutex<Option<slint::Weak<crate::TimeTrans>>>>,
+}
+
+impl ShortcutWindows {
+    fn new() -> Self {
+        Self {
+            history: Arc::new(Mutex::new(None)),
+            screenshot: Arc::new(Mutex::new(None)),
+            translation: Arc::new(Mutex::new(None)),
+            time_trans: Arc::new(Mutex::new(None)),
+        }
+    }
+}
 
 /// Starts the app, enforces a single instance, initializes features, and enters the Slint loop.
 pub fn run() {
@@ -89,8 +128,6 @@ pub fn run() {
     ));
     info!("settings path: {}", settings_store.path().display());
 
-    let time_trans_window = init_time_trans_window();
-    let weak_window = time_trans_window.as_weak();
     let translation_cancel_generation = Arc::new(AtomicU64::new(0));
     let settings_snapshot = settings.lock().unwrap().clone();
     let translation_service = Arc::new(TranslationService::new(
@@ -103,12 +140,6 @@ pub fn run() {
         settings_snapshot.ai_backend,
         &settings_snapshot.tencent_cloud,
     ));
-    let text_translation_window = init_text_translation_window(
-        Arc::clone(&translation_cancel_generation),
-        Arc::clone(&settings),
-        Arc::clone(&translation_service),
-    );
-    let weak_translation_window = text_translation_window.as_weak();
     let clipboard_history_dir = clipboard_history_dir();
     let clipboard_history = Arc::new(Mutex::new(
         load_history(&clipboard_history_dir).unwrap_or_else(|err| {
@@ -118,48 +149,190 @@ pub fn run() {
     ));
     let suppress_shortcuts = Arc::new(AtomicBool::new(false));
     let suppress_next_clipboard_history = Arc::new(Mutex::new(None));
-    let clipboard_history_window = init_clipboard_history_window(
-        Arc::clone(&clipboard_history),
-        clipboard_history_dir.clone(),
-        Arc::clone(&suppress_shortcuts),
-        Arc::clone(&suppress_next_clipboard_history),
-    );
-    let file_preview_window = init_file_preview_window(false, Arc::clone(&ocr_service));
-    let screenshot_window = init_screenshot_window();
+    let clipboard_listener_started = Arc::new(AtomicBool::new(false));
+    let app_windows = Rc::new(RefCell::new(AppWindows::default()));
+    register_ui_app_windows(Rc::clone(&app_windows));
+    let shortcut_windows = ShortcutWindows::new();
     let tray_state = init_tray_icon(&settings.lock().unwrap());
-    let settings_window = init_settings_window(
-        Arc::clone(&settings),
-        settings_store.clone(),
-        Arc::clone(&translation_service),
-        Arc::clone(&ocr_service),
-        tray_state.menu_handles(),
-        Rc::new(|_| {}),
-    );
+
+    let on_settings_applied: Rc<dyn Fn(&AppSettings)> = Rc::new({
+        let app_windows = Rc::clone(&app_windows);
+        let shortcut_windows = shortcut_windows.clone();
+        let clipboard_history = Arc::clone(&clipboard_history);
+        let settings = Arc::clone(&settings);
+        let clipboard_history_dir = clipboard_history_dir.clone();
+        let suppress_shortcuts = Arc::clone(&suppress_shortcuts);
+        let suppress_next_clipboard_history = Arc::clone(&suppress_next_clipboard_history);
+        let clipboard_listener_started = Arc::clone(&clipboard_listener_started);
+        let translation_cancel_generation = Arc::clone(&translation_cancel_generation);
+        let translation_service = Arc::clone(&translation_service);
+
+        move |settings_snapshot| {
+            if settings_snapshot.copy_timestamp.enabled {
+                ensure_time_trans_window(&app_windows, &shortcut_windows);
+            }
+            if settings_snapshot.clipboard_history.enabled {
+                ensure_clipboard_history_window(
+                    &app_windows,
+                    &shortcut_windows,
+                    Arc::clone(&clipboard_history),
+                    clipboard_history_dir.clone(),
+                    Arc::clone(&suppress_shortcuts),
+                    Arc::clone(&suppress_next_clipboard_history),
+                );
+                ensure_clipboard_listener_started(
+                    &clipboard_listener_started,
+                    ClipboardListenerDeps {
+                        history: Arc::clone(&clipboard_history),
+                        settings: Arc::clone(&settings),
+                        shortcut_windows: shortcut_windows.clone(),
+                        suppress_next_clipboard_history: Arc::clone(
+                            &suppress_next_clipboard_history,
+                        ),
+                        history_dir: clipboard_history_dir.clone(),
+                    },
+                );
+            }
+            if settings_snapshot.screenshot.enabled {
+                ensure_screenshot_window(&app_windows, &shortcut_windows);
+            }
+            if settings_snapshot.text_translation.enabled {
+                ensure_text_translation_window(
+                    &app_windows,
+                    &shortcut_windows,
+                    Arc::clone(&translation_cancel_generation),
+                    Arc::clone(&settings),
+                    Arc::clone(&translation_service),
+                );
+            }
+        }
+    });
+
+    on_settings_applied(&settings_snapshot);
+
     let home_window = init_home_window(
-        &time_trans_window,
-        &clipboard_history_window,
-        Arc::clone(&clipboard_history),
-        &text_translation_window,
-        Arc::clone(&translation_cancel_generation),
-        &file_preview_window,
-        &screenshot_window,
-        &settings_window,
-        Arc::clone(&settings),
+        {
+            let app_windows = Rc::clone(&app_windows);
+            let shortcut_windows = shortcut_windows.clone();
+            move || {
+                let weak = ensure_time_trans_window(&app_windows, &shortcut_windows);
+                if let Some(window) = weak.upgrade() {
+                    let _ = show_without_taskbar_icon(&window);
+                    activate_slint_window(&window);
+                }
+            }
+        },
+        {
+            let app_windows = Rc::clone(&app_windows);
+            let shortcut_windows = shortcut_windows.clone();
+            let clipboard_history = Arc::clone(&clipboard_history);
+            let clipboard_history_dir = clipboard_history_dir.clone();
+            let suppress_shortcuts = Arc::clone(&suppress_shortcuts);
+            let suppress_next_clipboard_history = Arc::clone(&suppress_next_clipboard_history);
+            let settings = Arc::clone(&settings);
+            let clipboard_listener_started = Arc::clone(&clipboard_listener_started);
+            move || {
+                let weak = ensure_clipboard_history_window(
+                    &app_windows,
+                    &shortcut_windows,
+                    Arc::clone(&clipboard_history),
+                    clipboard_history_dir.clone(),
+                    Arc::clone(&suppress_shortcuts),
+                    Arc::clone(&suppress_next_clipboard_history),
+                );
+                if settings.lock().unwrap().clipboard_history.enabled {
+                    ensure_clipboard_listener_started(
+                        &clipboard_listener_started,
+                        ClipboardListenerDeps {
+                            history: Arc::clone(&clipboard_history),
+                            settings: Arc::clone(&settings),
+                            shortcut_windows: shortcut_windows.clone(),
+                            suppress_next_clipboard_history: Arc::clone(
+                                &suppress_next_clipboard_history,
+                            ),
+                            history_dir: clipboard_history_dir.clone(),
+                        },
+                    );
+                }
+                if let Some(window) = weak.upgrade() {
+                    show_clipboard_history_window(&window, &clipboard_history);
+                }
+            }
+        },
+        {
+            let app_windows = Rc::clone(&app_windows);
+            let shortcut_windows = shortcut_windows.clone();
+            let translation_cancel_generation = Arc::clone(&translation_cancel_generation);
+            let settings = Arc::clone(&settings);
+            let translation_service = Arc::clone(&translation_service);
+            move || {
+                translation_cancel_generation.fetch_add(1, Ordering::SeqCst);
+                let weak = ensure_text_translation_window(
+                    &app_windows,
+                    &shortcut_windows,
+                    Arc::clone(&translation_cancel_generation),
+                    Arc::clone(&settings),
+                    Arc::clone(&translation_service),
+                );
+                if let Some(window) = weak.upgrade() {
+                    show_translation_pending(&window, "");
+                    window.set_translating(false);
+                    activate_slint_window(&window);
+                }
+            }
+        },
+        {
+            let app_windows = Rc::clone(&app_windows);
+            let ocr_service = Arc::clone(&ocr_service);
+            move || {
+                let weak = ensure_file_preview_window(&app_windows, Arc::clone(&ocr_service));
+                if let Some(window) = weak.upgrade() {
+                    show_empty_file_preview_window(&window);
+                    activate_slint_window(&window);
+                }
+            }
+        },
+        {
+            let app_windows = Rc::clone(&app_windows);
+            let shortcut_windows = shortcut_windows.clone();
+            move || {
+                let weak = ensure_screenshot_window(&app_windows, &shortcut_windows);
+                if let Some(window) = weak.upgrade() {
+                    show_screenshot_window(&window);
+                }
+            }
+        },
+        {
+            let app_windows = Rc::clone(&app_windows);
+            let settings = Arc::clone(&settings);
+            let settings_store = settings_store.clone();
+            let translation_service = Arc::clone(&translation_service);
+            let ocr_service = Arc::clone(&ocr_service);
+            let tray_menu_handles = tray_state.menu_handles();
+            let on_settings_applied = Rc::clone(&on_settings_applied);
+            move || {
+                let settings_snapshot = settings.lock().unwrap().clone();
+                let weak = ensure_settings_window(
+                    &app_windows,
+                    SettingsWindowDeps {
+                        settings: Arc::clone(&settings),
+                        settings_store: settings_store.clone(),
+                        translation_service: Arc::clone(&translation_service),
+                        ocr_service: Arc::clone(&ocr_service),
+                        tray_menu_handles: tray_menu_handles.clone(),
+                        on_settings_applied: Rc::clone(&on_settings_applied),
+                    },
+                );
+                if let Some(window) = weak.upgrade() {
+                    show_settings_window(&window, &settings_snapshot);
+                }
+            }
+        },
     );
-    let weak_history_window = clipboard_history_window.as_weak();
-    start_clipboard_history_listener(
-        Arc::clone(&clipboard_history),
-        Arc::clone(&settings),
-        weak_history_window.clone(),
-        Arc::clone(&suppress_next_clipboard_history),
-        clipboard_history_dir,
-    )
-    .expect("failed to start clipboard history listener");
 
     let mouse_x = Arc::new(Mutex::new(0f64));
     let mouse_y = Arc::new(Mutex::new(0f64));
     let shortcut_state = Arc::new(Mutex::new(ShortcutState::default()));
-    let weak_screenshot_window = screenshot_window.as_weak();
     start_global_input_listener({
         let mouse_x = Arc::clone(&mouse_x);
         let mouse_y = Arc::clone(&mouse_y);
@@ -169,8 +342,10 @@ pub fn run() {
         let suppress_shortcuts = Arc::clone(&suppress_shortcuts);
         let translation_service = Arc::clone(&translation_service);
         let translation_cancel_generation = Arc::clone(&translation_cancel_generation);
-        let weak_translation_window = weak_translation_window.clone();
-        let weak_screenshot_window = weak_screenshot_window.clone();
+        let shortcut_windows = shortcut_windows.clone();
+        let clipboard_history_dir = clipboard_history_dir.clone();
+        let suppress_next_clipboard_history = Arc::clone(&suppress_next_clipboard_history);
+        let clipboard_listener_started = Arc::clone(&clipboard_listener_started);
 
         move |event| {
             if let EventType::MouseMove { x, y } = event.event_type {
@@ -182,11 +357,13 @@ pub fn run() {
             update_shortcut_state(&shortcut_state, &event.event_type);
 
             if matches!(event.event_type, EventType::KeyPress(Key::Escape)) {
-                let _ = weak_screenshot_window.upgrade_in_event_loop(move |window| {
-                    if window.window().is_visible() {
-                        cancel_screenshot_window(&window);
-                    }
-                });
+                if let Some(weak) = shortcut_windows.screenshot.lock().unwrap().clone() {
+                    let _ = weak.upgrade_in_event_loop(move |window| {
+                        if window.window().is_visible() {
+                            cancel_screenshot_window(&window);
+                        }
+                    });
+                }
             }
 
             if should_show_history(&shortcut_state, &event.event_type)
@@ -194,11 +371,49 @@ pub fn run() {
             {
                 if settings.lock().unwrap().clipboard_history.enabled {
                     let history = Arc::clone(&clipboard_history);
-                    weak_history_window
-                        .upgrade_in_event_loop(move |window| {
+                    if let Some(weak) = shortcut_windows.history.lock().unwrap().clone() {
+                        weak.upgrade_in_event_loop(move |window| {
                             show_clipboard_history_window(&window, &history);
                         })
                         .expect("failed to show clipboard history window");
+                    } else {
+                        let shortcut_windows = shortcut_windows.clone();
+                        let clipboard_history = Arc::clone(&clipboard_history);
+                        let clipboard_history_dir = clipboard_history_dir.clone();
+                        let suppress_shortcuts = Arc::clone(&suppress_shortcuts);
+                        let suppress_next_clipboard_history =
+                            Arc::clone(&suppress_next_clipboard_history);
+                        let settings = Arc::clone(&settings);
+                        let clipboard_listener_started = Arc::clone(&clipboard_listener_started);
+                        slint::invoke_from_event_loop(move || {
+                            with_ui_app_windows(|app_windows| {
+                                let weak = ensure_clipboard_history_window(
+                                    app_windows,
+                                    &shortcut_windows,
+                                    Arc::clone(&clipboard_history),
+                                    clipboard_history_dir.clone(),
+                                    Arc::clone(&suppress_shortcuts),
+                                    Arc::clone(&suppress_next_clipboard_history),
+                                );
+                                ensure_clipboard_listener_started(
+                                    &clipboard_listener_started,
+                                    ClipboardListenerDeps {
+                                        history: Arc::clone(&clipboard_history),
+                                        settings: Arc::clone(&settings),
+                                        shortcut_windows: shortcut_windows.clone(),
+                                        suppress_next_clipboard_history: Arc::clone(
+                                            &suppress_next_clipboard_history,
+                                        ),
+                                        history_dir: clipboard_history_dir.clone(),
+                                    },
+                                );
+                                if let Some(window) = weak.upgrade() {
+                                    show_clipboard_history_window(&window, &clipboard_history);
+                                }
+                            });
+                        })
+                        .expect("failed to create clipboard history window");
+                    }
                 }
             }
 
@@ -206,11 +421,23 @@ pub fn run() {
                 && !suppress_shortcuts.load(Ordering::SeqCst)
             {
                 if settings.lock().unwrap().screenshot.enabled {
-                    weak_screenshot_window
-                        .upgrade_in_event_loop(move |window| {
+                    if let Some(weak) = shortcut_windows.screenshot.lock().unwrap().clone() {
+                        weak.upgrade_in_event_loop(move |window| {
                             show_screenshot_window(&window);
                         })
                         .expect("failed to show screenshot window");
+                    } else {
+                        let shortcut_windows = shortcut_windows.clone();
+                        slint::invoke_from_event_loop(move || {
+                            with_ui_app_windows(|app_windows| {
+                                let weak = ensure_screenshot_window(app_windows, &shortcut_windows);
+                                if let Some(window) = weak.upgrade() {
+                                    show_screenshot_window(&window);
+                                }
+                            });
+                        })
+                        .expect("failed to create screenshot window");
+                    }
                 }
             }
 
@@ -219,7 +446,8 @@ pub fn run() {
                 if settings_snapshot.text_translation.enabled {
                     let translation_service = Arc::clone(&translation_service);
                     let translation_cancel_generation = Arc::clone(&translation_cancel_generation);
-                    let weak_translation_window = weak_translation_window.clone();
+                    let shortcut_windows = shortcut_windows.clone();
+                    let settings = Arc::clone(&settings);
                     std::thread::spawn(move || {
                         std::thread::sleep(Duration::from_millis(200));
 
@@ -232,12 +460,29 @@ pub fn run() {
                             return;
                         };
 
-                        trigger_translation(
-                            weak_translation_window,
-                            translation_cancel_generation,
-                            translation_service,
-                            source_text,
-                        );
+                        slint::invoke_from_event_loop(move || {
+                            let weak = shortcut_windows.translation.lock().unwrap().clone();
+                            let weak = weak.unwrap_or_else(|| {
+                                let mut created = None;
+                                with_ui_app_windows(|app_windows| {
+                                    created = Some(ensure_text_translation_window(
+                                        app_windows,
+                                        &shortcut_windows,
+                                        Arc::clone(&translation_cancel_generation),
+                                        Arc::clone(&settings),
+                                        Arc::clone(&translation_service),
+                                    ));
+                                });
+                                created.expect("translation window registry should be initialized")
+                            });
+                            trigger_translation(
+                                weak,
+                                translation_cancel_generation,
+                                translation_service,
+                                source_text,
+                            );
+                        })
+                        .expect("failed to create translation window");
                     });
                 }
 
@@ -247,8 +492,8 @@ pub fn run() {
 
                 let cur_x = *mouse_x.lock().unwrap();
                 let cur_y = *mouse_y.lock().unwrap();
-                weak_window
-                    .upgrade_in_event_loop(move |window| {
+                if let Some(weak) = shortcut_windows.time_trans.lock().unwrap().clone() {
+                    weak.upgrade_in_event_loop(move |window| {
                         std::thread::sleep(Duration::from_millis(200));
 
                         let mut clipboard = Clipboard::new().unwrap();
@@ -266,6 +511,35 @@ pub fn run() {
                         }
                     })
                     .expect("failed to send event to UI thread");
+                } else {
+                    let shortcut_windows = shortcut_windows.clone();
+                    slint::invoke_from_event_loop(move || {
+                        with_ui_app_windows(|app_windows| {
+                            let weak = ensure_time_trans_window(app_windows, &shortcut_windows);
+                            if let Some(window) = weak.upgrade() {
+                                std::thread::sleep(Duration::from_millis(200));
+
+                                let mut clipboard = Clipboard::new().unwrap();
+                                let text = clipboard.get_text().ok();
+
+                                if let Some(text) = text {
+                                    window.set_input_value(text.trim().into());
+                                    window.set_close_time(3);
+
+                                    if !window.get_has_hover() {
+                                        let (move_x, move_y) =
+                                            next_window_position(&window, cur_x, cur_y);
+                                        info!(
+                                            "set window pos to x:{move_x},y:{move_y},copy:{text}"
+                                        );
+                                        set_position(&window, move_x, move_y);
+                                    }
+                                }
+                            }
+                        });
+                    })
+                    .expect("failed to create time translation window");
+                }
             }
 
             Ok(())
@@ -297,10 +571,162 @@ pub fn run() {
                 }
             }
         },
-        |_| {},
+        {
+            let on_settings_applied = Rc::clone(&on_settings_applied);
+            move |settings| on_settings_applied(settings)
+        },
     );
     let _model_cleanup_timer = model_cleanup_timer;
     slint::run_event_loop_until_quit().unwrap();
+}
+
+fn register_ui_app_windows(app_windows: Rc<RefCell<AppWindows>>) {
+    UI_APP_WINDOWS.with(|store| {
+        *store.borrow_mut() = Some(app_windows);
+    });
+}
+
+fn with_ui_app_windows(action: impl FnOnce(&Rc<RefCell<AppWindows>>)) {
+    UI_APP_WINDOWS.with(|store| {
+        if let Some(app_windows) = store.borrow().as_ref() {
+            action(app_windows);
+        } else {
+            log::error!("UI window registry is not initialized");
+        }
+    });
+}
+
+fn ensure_time_trans_window(
+    app_windows: &Rc<RefCell<AppWindows>>,
+    shortcut_windows: &ShortcutWindows,
+) -> slint::Weak<crate::TimeTrans> {
+    let mut windows = app_windows.borrow_mut();
+    let window = windows
+        .time_trans
+        .get_or_insert_with(init_time_trans_window);
+    let weak = window.as_weak();
+    *shortcut_windows.time_trans.lock().unwrap() = Some(weak.clone());
+    weak
+}
+
+fn ensure_clipboard_history_window(
+    app_windows: &Rc<RefCell<AppWindows>>,
+    shortcut_windows: &ShortcutWindows,
+    clipboard_history: Arc<Mutex<ClipboardHistory>>,
+    clipboard_history_dir: PathBuf,
+    suppress_shortcuts: Arc<AtomicBool>,
+    suppress_next_clipboard_history: Arc<Mutex<Option<ClipboardHistoryItem>>>,
+) -> slint::Weak<crate::ClipboardHistoryWindow> {
+    let mut windows = app_windows.borrow_mut();
+    let window = windows.history.get_or_insert_with(|| {
+        init_clipboard_history_window(
+            clipboard_history,
+            clipboard_history_dir,
+            suppress_shortcuts,
+            suppress_next_clipboard_history,
+        )
+    });
+    let weak = window.as_weak();
+    *shortcut_windows.history.lock().unwrap() = Some(weak.clone());
+    weak
+}
+
+fn ensure_text_translation_window(
+    app_windows: &Rc<RefCell<AppWindows>>,
+    shortcut_windows: &ShortcutWindows,
+    translation_cancel_generation: Arc<AtomicU64>,
+    settings: Arc<Mutex<AppSettings>>,
+    translation_service: Arc<TranslationService>,
+) -> slint::Weak<crate::TextTranslationWindow> {
+    let mut windows = app_windows.borrow_mut();
+    let window = windows.translation.get_or_insert_with(|| {
+        init_text_translation_window(translation_cancel_generation, settings, translation_service)
+    });
+    let weak = window.as_weak();
+    *shortcut_windows.translation.lock().unwrap() = Some(weak.clone());
+    weak
+}
+
+fn ensure_file_preview_window(
+    app_windows: &Rc<RefCell<AppWindows>>,
+    ocr_service: Arc<OcrService>,
+) -> slint::Weak<crate::FilePreviewWindow> {
+    let mut windows = app_windows.borrow_mut();
+    let window = windows
+        .file_preview
+        .get_or_insert_with(|| init_file_preview_window(false, ocr_service));
+    window.as_weak()
+}
+
+fn ensure_screenshot_window(
+    app_windows: &Rc<RefCell<AppWindows>>,
+    shortcut_windows: &ShortcutWindows,
+) -> slint::Weak<crate::ScreenshotWindow> {
+    let mut windows = app_windows.borrow_mut();
+    let window = windows
+        .screenshot
+        .get_or_insert_with(init_screenshot_window);
+    let weak = window.as_weak();
+    *shortcut_windows.screenshot.lock().unwrap() = Some(weak.clone());
+    weak
+}
+
+struct SettingsWindowDeps {
+    settings: Arc<Mutex<AppSettings>>,
+    settings_store: SettingsStore,
+    translation_service: Arc<TranslationService>,
+    ocr_service: Arc<OcrService>,
+    tray_menu_handles: TrayMenuHandles,
+    on_settings_applied: Rc<dyn Fn(&AppSettings)>,
+}
+
+fn ensure_settings_window(
+    app_windows: &Rc<RefCell<AppWindows>>,
+    deps: SettingsWindowDeps,
+) -> slint::Weak<crate::SettingsWindow> {
+    let mut windows = app_windows.borrow_mut();
+    let window = windows.settings.get_or_insert_with(|| {
+        init_settings_window(
+            deps.settings,
+            deps.settings_store,
+            deps.translation_service,
+            deps.ocr_service,
+            deps.tray_menu_handles,
+            deps.on_settings_applied,
+        )
+    });
+    window.as_weak()
+}
+
+struct ClipboardListenerDeps {
+    history: Arc<Mutex<ClipboardHistory>>,
+    settings: Arc<Mutex<AppSettings>>,
+    shortcut_windows: ShortcutWindows,
+    suppress_next_clipboard_history: Arc<Mutex<Option<ClipboardHistoryItem>>>,
+    history_dir: PathBuf,
+}
+
+fn ensure_clipboard_listener_started(started: &Arc<AtomicBool>, deps: ClipboardListenerDeps) {
+    if started.swap(true, Ordering::SeqCst) {
+        return;
+    }
+
+    let Some(history_window) = deps.shortcut_windows.history.lock().unwrap().clone() else {
+        started.store(false, Ordering::SeqCst);
+        log::error!("clipboard history listener requires a clipboard history window");
+        return;
+    };
+
+    if let Err(err) = start_clipboard_history_listener(
+        deps.history,
+        deps.settings,
+        history_window,
+        deps.suppress_next_clipboard_history,
+        deps.history_dir,
+    ) {
+        started.store(false, Ordering::SeqCst);
+        log::error!("failed to start clipboard history listener: {err}");
+    }
 }
 
 fn next_window_position(window: &crate::TimeTrans, cur_x: f64, cur_y: f64) -> (f64, f64) {
@@ -406,4 +832,19 @@ fn current_system_modifiers() -> Option<ShortcutModifiers> {
 #[cfg(not(target_os = "windows"))]
 fn current_system_modifiers() -> Option<ShortcutModifiers> {
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shortcut_windows_start_empty() {
+        let windows = ShortcutWindows::new();
+
+        assert!(windows.history.lock().unwrap().is_none());
+        assert!(windows.screenshot.lock().unwrap().is_none());
+        assert!(windows.translation.lock().unwrap().is_none());
+        assert!(windows.time_trans.lock().unwrap().is_none());
+    }
 }

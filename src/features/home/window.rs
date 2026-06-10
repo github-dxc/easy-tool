@@ -1,87 +1,30 @@
 //! Slint window setup and callbacks for the application home page.
 
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
-
 use slint::{CloseRequestResponse, ComponentHandle};
 
-use crate::features::clipboard_history::history::ClipboardHistory;
-use crate::features::clipboard_history::window::show_clipboard_history_window;
-use crate::features::file_preview::window::show_empty_file_preview_window;
-use crate::features::screenshot::window::show_screenshot_window;
-use crate::features::settings::window::show_settings_window;
-use crate::features::text_translation::window::show_translation_pending;
-use crate::platform::window::{activate_slint_window, show_without_taskbar_icon};
-use crate::settings::AppSettings;
-use crate::{
-    ClipboardHistoryWindow, FilePreviewWindow, HomeWindow, ScreenshotWindow, SettingsWindow,
-    TextTranslationWindow, TimeTrans,
-};
+use crate::HomeWindow;
+use crate::platform::window::activate_slint_window;
 
 /// Builds the home window and binds each tool tile to the matching feature window.
 pub fn init_home_window(
-    time_trans_window: &TimeTrans,
-    clipboard_history_window: &ClipboardHistoryWindow,
-    clipboard_history: Arc<Mutex<ClipboardHistory>>,
-    text_translation_window: &TextTranslationWindow,
-    translation_cancel_generation: Arc<AtomicU64>,
-    file_preview_window: &FilePreviewWindow,
-    screenshot_window: &ScreenshotWindow,
-    settings_window: &SettingsWindow,
-    settings: Arc<Mutex<AppSettings>>,
+    open_time_trans: impl Fn() + 'static,
+    open_clipboard_history: impl Fn() + 'static,
+    open_text_translation: impl Fn() + 'static,
+    open_file_preview: impl Fn() + 'static,
+    open_screenshot: impl Fn() + 'static,
+    open_settings: impl Fn() + 'static,
 ) -> HomeWindow {
     let window = HomeWindow::new().unwrap();
     window
         .window()
         .on_close_requested(|| CloseRequestResponse::HideWindow);
 
-    let weak_time = time_trans_window.as_weak();
-    window.on_open_time_trans(move || {
-        if let Some(ui) = weak_time.upgrade() {
-            let _ = show_without_taskbar_icon(&ui);
-            activate_slint_window(&ui);
-        }
-    });
-
-    let weak_history = clipboard_history_window.as_weak();
-    window.on_open_clipboard_history(move || {
-        if let Some(ui) = weak_history.upgrade() {
-            show_clipboard_history_window(&ui, &clipboard_history);
-        }
-    });
-
-    let weak_translation = text_translation_window.as_weak();
-    window.on_open_text_translation(move || {
-        translation_cancel_generation.fetch_add(1, Ordering::SeqCst);
-        if let Some(ui) = weak_translation.upgrade() {
-            show_translation_pending(&ui, "");
-            ui.set_translating(false);
-            activate_slint_window(&ui);
-        }
-    });
-
-    let weak_preview = file_preview_window.as_weak();
-    window.on_open_file_preview(move || {
-        if let Some(ui) = weak_preview.upgrade() {
-            show_empty_file_preview_window(&ui);
-            activate_slint_window(&ui);
-        }
-    });
-
-    let weak_screenshot = screenshot_window.as_weak();
-    window.on_open_screenshot(move || {
-        if let Some(ui) = weak_screenshot.upgrade() {
-            show_screenshot_window(&ui);
-        }
-    });
-
-    let weak_settings = settings_window.as_weak();
-    window.on_open_settings(move || {
-        let settings_snapshot = settings.lock().unwrap().clone();
-        if let Some(ui) = weak_settings.upgrade() {
-            show_settings_window(&ui, &settings_snapshot);
-        }
-    });
+    window.on_open_time_trans(open_time_trans);
+    window.on_open_clipboard_history(open_clipboard_history);
+    window.on_open_text_translation(open_text_translation);
+    window.on_open_file_preview(open_file_preview);
+    window.on_open_screenshot(open_screenshot);
+    window.on_open_settings(open_settings);
 
     window
 }
