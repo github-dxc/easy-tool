@@ -44,13 +44,39 @@ pub fn load_history(dir: &Path) -> Result<ClipboardHistory, String> {
     let persisted = serde_json::from_str::<PersistedClipboardHistory>(&content)
         .map_err(|err| format!("parse history failed: {err}"))?;
 
-    let mut history = ClipboardHistory::default();
-    for entry in persisted.entries.into_iter().rev() {
-        history.push(entry);
+    let mut cleanup_paths = Vec::new();
+
+    let mut newest_first = Vec::new();
+    for entry in persisted.entries {
+        if let Some(path) = entry.image_path()
+            && !is_managed_existing_clipboard_image_path(dir, path)
+        {
+            cleanup_paths.push(path.to_path_buf());
+            continue;
+        }
+
+        if newest_first
+            .iter()
+            .any(|latest: &ClipboardHistoryItem| latest.same_content(&entry))
+        {
+            if let Some(path) = entry.image_path() {
+                cleanup_paths.push(path.to_path_buf());
+            }
+            continue;
+        }
+
+        newest_first.push(entry);
     }
-    history.retain_valid_images();
-    history.trim_to_limit();
-    save_history(dir, &history)?;
+
+    let mut history = ClipboardHistory::default();
+    for entry in newest_first.into_iter().rev() {
+        cleanup_paths.extend(history.push(entry));
+    }
+    cleanup_paths.extend(history.trim_to_limit());
+    match save_history(dir, &history) {
+        Ok(()) => delete_image_files(dir, cleanup_paths),
+        Err(err) => log::error!("rewrite cleaned clipboard history failed: {err}"),
+    }
     Ok(history)
 }
 
@@ -111,6 +137,15 @@ fn is_existing_path_inside_dir(canonical_dir: &Path, path: &Path) -> bool {
         .is_ok_and(|candidate| candidate.starts_with(canonical_dir))
 }
 
+fn is_managed_existing_clipboard_image_path(dir: &Path, path: &Path) -> bool {
+    if !is_generated_clipboard_image_path(path) {
+        return false;
+    }
+
+    dir.canonicalize()
+        .is_ok_and(|history_dir| is_existing_path_inside_dir(&history_dir, path))
+}
+
 fn write_index_atomically(dir: &Path, content: &str) -> Result<(), String> {
     std::fs::create_dir_all(dir).map_err(|err| format!("create history dir failed: {err}"))?;
     let index_path = history_index_path(dir);
@@ -133,25 +168,43 @@ fn write_index_atomically(dir: &Path, content: &str) -> Result<(), String> {
         return Err(err);
     }
 
-    match std::fs::rename(&temp_path, &index_path) {
-        Ok(()) => Ok(()),
-        Err(_) if index_path.exists() => {
-            if let Err(remove_err) = std::fs::remove_file(&index_path) {
-                if remove_err.kind() != std::io::ErrorKind::NotFound {
-                    let _ = std::fs::remove_file(&temp_path);
-                    return Err(format!("replace history index failed: {remove_err}"));
-                }
-            }
-            std::fs::rename(&temp_path, &index_path).map_err(|err| {
-                let _ = std::fs::remove_file(&temp_path);
-                format!("replace history index failed: {err}")
-            })
-        }
-        Err(err) => {
-            let _ = std::fs::remove_file(&temp_path);
-            Err(format!("replace history index failed: {err}"))
-        }
+    replace_file(&temp_path, &index_path).map_err(|err| {
+        let _ = std::fs::remove_file(&temp_path);
+        format!("replace history index failed: {err}")
+    })
+}
+
+#[cfg(target_os = "windows")]
+fn replace_file(from: &Path, to: &Path) -> std::io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{
+        MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
+    };
+
+    fn wide(path: &Path) -> Vec<u16> {
+        path.as_os_str().encode_wide().chain(Some(0)).collect()
     }
+
+    let from = wide(from);
+    let to = wide(to);
+    let result = unsafe {
+        MoveFileExW(
+            from.as_ptr(),
+            to.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    };
+
+    if result == 0 {
+        Err(std::io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn replace_file(from: &Path, to: &Path) -> std::io::Result<()> {
+    std::fs::rename(from, to)
 }
 
 fn next_index_temp_path(dir: &Path) -> Result<PathBuf, String> {
@@ -343,6 +396,149 @@ mod tests {
     }
 
     #[test]
+    fn load_deletes_duplicate_image_files_removed_during_recovery() {
+        let dir = tempdir().unwrap();
+        let newest_path = dir.path().join("clipboard-image-1-0.png");
+        let older_path = dir.path().join("clipboard-image-1-1.png");
+        let bytes = b"same png bytes";
+        std::fs::write(&newest_path, bytes).unwrap();
+        std::fs::write(&older_path, bytes).unwrap();
+        let mut history = ClipboardHistory::default();
+        history.push(ClipboardHistoryItem::Image {
+            width: 2,
+            height: 2,
+            path: older_path.clone(),
+            byte_len: bytes.len() as u64,
+        });
+        history.push(ClipboardHistoryItem::Image {
+            width: 2,
+            height: 2,
+            path: newest_path.clone(),
+            byte_len: bytes.len() as u64,
+        });
+        let index = serde_json::json!({
+            "entries": [
+                {
+                    "Image": {
+                        "width": 2,
+                        "height": 2,
+                        "path": newest_path,
+                        "byte_len": bytes.len()
+                    }
+                },
+                {
+                    "Image": {
+                        "width": 2,
+                        "height": 2,
+                        "path": older_path,
+                        "byte_len": bytes.len()
+                    }
+                }
+            ]
+        });
+        std::fs::write(
+            history_index_path(dir.path()),
+            serde_json::to_string(&index).unwrap(),
+        )
+        .unwrap();
+
+        let loaded = load_history(dir.path()).unwrap();
+
+        assert_eq!(loaded.items().len(), 1);
+        let kept_path = loaded
+            .get(0)
+            .and_then(|item| item.image_path().map(std::path::Path::to_path_buf));
+        assert_eq!(kept_path, Some(newest_path.clone()));
+        assert!(newest_path.exists());
+        assert!(!older_path.exists());
+    }
+
+    #[test]
+    fn load_keeps_newer_duplicate_image_when_non_image_entry_is_newest() {
+        let dir = tempdir().unwrap();
+        let newest_path = dir.path().join("clipboard-image-2-0.png");
+        let older_path = dir.path().join("clipboard-image-2-1.png");
+        let bytes = b"same png bytes";
+        std::fs::write(&newest_path, bytes).unwrap();
+        std::fs::write(&older_path, bytes).unwrap();
+        let index = serde_json::json!({
+            "entries": [
+                { "Text": { "text": "newer text" } },
+                {
+                    "Image": {
+                        "width": 2,
+                        "height": 2,
+                        "path": newest_path,
+                        "byte_len": bytes.len()
+                    }
+                },
+                {
+                    "Image": {
+                        "width": 2,
+                        "height": 2,
+                        "path": older_path,
+                        "byte_len": bytes.len()
+                    }
+                }
+            ]
+        });
+        std::fs::write(
+            history_index_path(dir.path()),
+            serde_json::to_string(&index).unwrap(),
+        )
+        .unwrap();
+
+        let loaded = load_history(dir.path()).unwrap();
+
+        assert_eq!(loaded.items().len(), 2);
+        let kept_path = loaded
+            .get(1)
+            .and_then(|item| item.image_path().map(std::path::Path::to_path_buf));
+        assert_eq!(kept_path, Some(newest_path.clone()));
+        assert!(newest_path.exists());
+        assert!(!older_path.exists());
+    }
+
+    #[test]
+    fn load_deletes_over_limit_image_files_removed_during_recovery() {
+        let dir = tempdir().unwrap();
+        let entries = (0..21)
+            .map(|index| {
+                let path = dir.path().join(format!("clipboard-image-{index}-0.png"));
+                std::fs::write(&path, format!("png {index}")).unwrap();
+                serde_json::json!({
+                    "Image": {
+                        "width": 1,
+                        "height": 1,
+                        "path": path,
+                        "byte_len": format!("png {index}").len()
+                    }
+                })
+            })
+            .collect::<Vec<_>>();
+        std::fs::write(
+            history_index_path(dir.path()),
+            serde_json::to_string(&serde_json::json!({ "entries": entries })).unwrap(),
+        )
+        .unwrap();
+
+        let loaded = load_history(dir.path()).unwrap();
+
+        assert_eq!(loaded.items().len(), 20);
+        let remaining_files = std::fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_str()
+                    .is_some_and(|name| name.starts_with("clipboard-image-"))
+            })
+            .count();
+        assert_eq!(remaining_files, 20);
+    }
+
+    #[test]
     fn delete_image_files_removes_existing_files() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("clipboard-image-1-0.png");
@@ -394,5 +590,35 @@ mod tests {
         delete_image_files(dir.path(), vec![path.clone()]);
 
         assert!(path.exists());
+    }
+
+    #[test]
+    fn load_skips_existing_image_paths_outside_history_dir() {
+        let dir = tempdir().unwrap();
+        let outside = tempdir().unwrap();
+        let outside_path = outside.path().join("clipboard-image-1-0.png");
+        std::fs::write(&outside_path, b"png").unwrap();
+        let index = serde_json::json!({
+            "entries": [
+                {
+                    "Image": {
+                        "width": 1,
+                        "height": 1,
+                        "path": outside_path,
+                        "byte_len": 3
+                    }
+                }
+            ]
+        });
+        std::fs::write(
+            history_index_path(dir.path()),
+            serde_json::to_string(&index).unwrap(),
+        )
+        .unwrap();
+
+        let loaded = load_history(dir.path()).unwrap();
+
+        assert_eq!(loaded.items().len(), 0);
+        assert!(outside_path.exists());
     }
 }

@@ -5,13 +5,14 @@ use std::process::Command;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use rdev::{EventType, Key, simulate};
 use slint::{ComponentHandle, Image, ModelRc, Rgba8Pixel, SharedPixelBuffer, VecModel};
 
 use crate::features::clipboard_history::clipboard::put_clipboard_item;
 use crate::features::clipboard_history::history::{ClipboardHistory, ClipboardHistoryItem};
+use crate::features::clipboard_history::store::{delete_image_files, save_history};
 use crate::features::file_preview::window::is_supported_preview_file;
 use crate::platform::window::activate_slint_window;
 use crate::{ClipboardHistoryRow, ClipboardHistoryWindow};
@@ -19,6 +20,7 @@ use crate::{ClipboardHistoryRow, ClipboardHistoryWindow};
 /// Builds the clipboard-history window and binds actions for paste/delete/open.
 pub fn init_clipboard_history_window(
     history: Arc<Mutex<ClipboardHistory>>,
+    history_dir: PathBuf,
     suppress_shortcuts: Arc<AtomicBool>,
     suppress_next_clipboard_history: Arc<Mutex<Option<ClipboardHistoryItem>>>,
 ) -> ClipboardHistoryWindow {
@@ -62,19 +64,35 @@ pub fn init_clipboard_history_window(
     });
 
     let history_for_delete = Arc::clone(&history);
+    let history_dir_for_delete = history_dir.clone();
     let weak = window.as_weak();
     window.on_delete_entry(move |index| {
         if index < 0 {
             return;
         }
 
-        let removed = history_for_delete
-            .lock()
-            .unwrap()
-            .remove(index as usize)
-            .is_some();
-        if !removed {
+        let removed = {
+            let mut history = history_for_delete.lock().unwrap();
+            let mut next_history = history.clone();
+            let removed = next_history.remove(index as usize);
+            if removed.is_some() {
+                if let Err(err) = save_history(&history_dir_for_delete, &next_history) {
+                    log::error!("save clipboard history after delete failed: {err}");
+                    None
+                } else {
+                    *history = next_history;
+                    removed
+                }
+            } else {
+                None
+            }
+        };
+        let Some(removed) = removed else {
             return;
+        };
+
+        if let Some(path) = removed.image_path() {
+            delete_image_files(&history_dir_for_delete, vec![path.to_path_buf()]);
         }
 
         if let Some(ui) = weak.upgrade() {
@@ -123,39 +141,9 @@ fn preview_path_from_history_item(item: &ClipboardHistoryItem) -> Result<Option<
 
             Ok(is_supported_preview_file(&path).then_some(path))
         }
-        ClipboardHistoryItem::Image { .. } => save_history_image_preview(item).map(Some),
+        ClipboardHistoryItem::Image { path, .. } => Ok(Some(path.clone())),
         ClipboardHistoryItem::Text { .. } => Ok(None),
     }
-}
-
-fn save_history_image_preview(item: &ClipboardHistoryItem) -> Result<PathBuf, String> {
-    let image = item
-        .image_data()
-        .ok_or_else(|| "history item is not an image".to_string())?;
-    let rgba = image::RgbaImage::from_raw(
-        image.width as u32,
-        image.height as u32,
-        image.bytes.into_owned(),
-    )
-    .ok_or_else(|| "invalid clipboard image bytes".to_string())?;
-
-    let dir = std::env::temp_dir()
-        .join("easy-tool")
-        .join("clipboard-preview");
-    std::fs::create_dir_all(&dir).map_err(|err| format!("create preview dir failed: {err}"))?;
-
-    let timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|err| format!("read system time failed: {err}"))?
-        .as_millis();
-    let path = dir.join(format!(
-        "clipboard-image-{}-{timestamp}.png",
-        std::process::id()
-    ));
-
-    rgba.save(&path)
-        .map_err(|err| format!("save clipboard image preview failed: {err}"))?;
-    Ok(path)
 }
 
 fn open_standalone_file_preview(path: &Path) -> Result<(), String> {

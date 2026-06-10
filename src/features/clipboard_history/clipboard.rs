@@ -5,12 +5,13 @@ use std::path::PathBuf;
 use arboard::{Clipboard, ImageData};
 
 use crate::features::clipboard_history::history::ClipboardHistoryItem;
+use crate::features::clipboard_history::store::CapturedClipboardItem;
 
 /// Reads the current clipboard and converts supported formats into a history item.
-pub fn capture_clipboard_item() -> Option<ClipboardHistoryItem> {
+pub fn capture_clipboard_item() -> Option<CapturedClipboardItem> {
     if let Some(paths) = platform::get_clipboard_files() {
         if !paths.is_empty() {
-            return Some(ClipboardHistoryItem::Files { paths });
+            return Some(CapturedClipboardItem::Files { paths });
         }
     }
 
@@ -22,7 +23,7 @@ pub fn capture_clipboard_item() -> Option<ClipboardHistoryItem> {
                 image.height,
                 image.bytes.len()
             );
-            return Some(ClipboardHistoryItem::Image {
+            return Some(CapturedClipboardItem::Image {
                 width: image.width,
                 height: image.height,
                 bytes: image.bytes.into_owned(),
@@ -32,7 +33,7 @@ pub fn capture_clipboard_item() -> Option<ClipboardHistoryItem> {
         if let Ok(text) = clipboard.get_text() {
             let text = text.trim().to_string();
             if !text.is_empty() {
-                return Some(ClipboardHistoryItem::Text { text });
+                return Some(CapturedClipboardItem::Text { text });
             }
         }
     }
@@ -50,15 +51,21 @@ pub fn put_clipboard_item(item: &ClipboardHistoryItem) -> Result<(), String> {
         ClipboardHistoryItem::Image {
             width,
             height,
-            bytes,
-        } => Clipboard::new()
-            .map_err(|err| format!("open clipboard failed: {err}"))?
-            .set_image(ImageData {
-                width: *width,
-                height: *height,
-                bytes: bytes.clone().into(),
-            })
-            .map_err(|err| format!("set image failed: {err}")),
+            path,
+            ..
+        } => {
+            let image = image::open(path)
+                .map_err(|err| format!("read clipboard image failed: {err}"))?
+                .into_rgba8();
+            Clipboard::new()
+                .map_err(|err| format!("open clipboard failed: {err}"))?
+                .set_image(ImageData {
+                    width: *width,
+                    height: *height,
+                    bytes: image.into_raw().into(),
+                })
+                .map_err(|err| format!("set image failed: {err}"))
+        }
         ClipboardHistoryItem::Files { paths } => platform::set_clipboard_files(paths),
     }
 }

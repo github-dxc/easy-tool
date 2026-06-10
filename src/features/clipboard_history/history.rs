@@ -25,7 +25,7 @@ pub enum ClipboardHistoryItem {
 }
 
 /// Fixed-size, newest-first clipboard history store.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct ClipboardHistory {
     items: VecDeque<ClipboardHistoryItem>,
 }

@@ -12,6 +12,7 @@ use slint::ComponentHandle;
 
 use crate::config::APP_INSTANCE_ID;
 use crate::features::clipboard_history::history::ClipboardHistory;
+use crate::features::clipboard_history::store::load_history;
 use crate::features::clipboard_history::window::{
     init_clipboard_history_window, show_clipboard_history_window,
 };
@@ -31,6 +32,7 @@ use crate::features::time_trans::window::init_time_trans_window;
 use crate::infrastructure::clipboard_listener::start_clipboard_history_listener;
 use crate::infrastructure::global_input::start_global_input_listener;
 use crate::infrastructure::logging::init_logging;
+use crate::infrastructure::paths::clipboard_history_dir;
 use crate::infrastructure::tray::{init_tray_icon, start_tray_event_pump};
 use crate::platform::dialog::show_message_box;
 use crate::platform::window::{display_size, set_position};
@@ -86,11 +88,18 @@ pub fn run() {
         Arc::clone(&translation_service),
     );
     let weak_translation_window = text_translation_window.as_weak();
-    let clipboard_history = Arc::new(Mutex::new(ClipboardHistory::default()));
+    let clipboard_history_dir = clipboard_history_dir();
+    let clipboard_history = Arc::new(Mutex::new(
+        load_history(&clipboard_history_dir).unwrap_or_else(|err| {
+            log::error!("load clipboard history failed: {err}");
+            ClipboardHistory::default()
+        }),
+    ));
     let suppress_shortcuts = Arc::new(AtomicBool::new(false));
     let suppress_next_clipboard_history = Arc::new(Mutex::new(None));
     let clipboard_history_window = init_clipboard_history_window(
         Arc::clone(&clipboard_history),
+        clipboard_history_dir.clone(),
         Arc::clone(&suppress_shortcuts),
         Arc::clone(&suppress_next_clipboard_history),
     );
@@ -121,6 +130,7 @@ pub fn run() {
         Arc::clone(&settings),
         weak_history_window.clone(),
         Arc::clone(&suppress_next_clipboard_history),
+        clipboard_history_dir,
     )
     .expect("failed to start clipboard history listener");
 
