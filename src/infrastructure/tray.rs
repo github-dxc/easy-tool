@@ -8,14 +8,16 @@ use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuIt
 use tray_icon::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 
 use crate::assets::load_tray_icon;
+use crate::features::file_preview::ocr::OcrService;
 use crate::features::text_translation::translator::TranslationService;
-use crate::settings::{AppSettings, SettingsStore};
+use crate::settings::{AiBackend, AppSettings, SettingsStore};
 
 const COPY_TIMESTAMP_MENU_ID: &str = "copy_timestamp_enabled";
 const CLIPBOARD_HISTORY_MENU_ID: &str = "clipboard_history_enabled";
 const SCREENSHOT_MENU_ID: &str = "screenshot_enabled";
-const TEXT_TRANSLATION_ZH_EN_MENU_ID: &str = "text_translation_zh_en";
-const TEXT_TRANSLATION_EN_ZH_MENU_ID: &str = "text_translation_en_zh";
+const TEXT_TRANSLATION_MENU_ID: &str = "text_translation_enabled";
+const AI_BACKEND_LOCAL_MENU_ID: &str = "ai_backend_local";
+const AI_BACKEND_TENCENT_MENU_ID: &str = "ai_backend_tencent";
 const QUIT_MENU_ID: &str = "quit";
 
 /// Keeps tray UI handles alive and exposes menu items needed by the event pump.
@@ -25,8 +27,9 @@ pub struct TrayState {
     copy_timestamp_item: CheckMenuItem,
     clipboard_history_item: CheckMenuItem,
     screenshot_item: CheckMenuItem,
-    text_translation_zh_en_item: CheckMenuItem,
-    text_translation_en_zh_item: CheckMenuItem,
+    text_translation_item: CheckMenuItem,
+    ai_backend_local_item: CheckMenuItem,
+    ai_backend_tencent_item: CheckMenuItem,
 }
 
 #[derive(Clone)]
@@ -34,8 +37,9 @@ pub struct TrayMenuHandles {
     copy_timestamp_item: CheckMenuItem,
     clipboard_history_item: CheckMenuItem,
     screenshot_item: CheckMenuItem,
-    text_translation_zh_en_item: CheckMenuItem,
-    text_translation_en_zh_item: CheckMenuItem,
+    text_translation_item: CheckMenuItem,
+    ai_backend_local_item: CheckMenuItem,
+    ai_backend_tencent_item: CheckMenuItem,
 }
 
 impl TrayState {
@@ -44,8 +48,9 @@ impl TrayState {
             copy_timestamp_item: self.copy_timestamp_item.clone(),
             clipboard_history_item: self.clipboard_history_item.clone(),
             screenshot_item: self.screenshot_item.clone(),
-            text_translation_zh_en_item: self.text_translation_zh_en_item.clone(),
-            text_translation_en_zh_item: self.text_translation_en_zh_item.clone(),
+            text_translation_item: self.text_translation_item.clone(),
+            ai_backend_local_item: self.ai_backend_local_item.clone(),
+            ai_backend_tencent_item: self.ai_backend_tencent_item.clone(),
         }
     }
 }
@@ -58,10 +63,12 @@ impl TrayMenuHandles {
             .set_checked(settings.clipboard_history.enabled);
         self.screenshot_item
             .set_checked(settings.screenshot.enabled);
-        self.text_translation_zh_en_item
+        self.text_translation_item
             .set_checked(settings.text_translation.enabled);
-        self.text_translation_en_zh_item
-            .set_checked(settings.text_translation.enabled);
+        self.ai_backend_local_item
+            .set_checked(settings.ai_backend == AiBackend::Local);
+        self.ai_backend_tencent_item
+            .set_checked(settings.ai_backend == AiBackend::Tencent);
     }
 }
 
@@ -71,7 +78,7 @@ pub fn init_tray_icon(settings: &AppSettings) -> TrayState {
 
     let copy_timestamp_item = CheckMenuItem::with_id(
         COPY_TIMESTAMP_MENU_ID,
-        "显示时间戳 - ctrl+c",
+        "显示时间戳 - Ctrl+C",
         true,
         settings.copy_timestamp.enabled,
         None,
@@ -80,7 +87,7 @@ pub fn init_tray_icon(settings: &AppSettings) -> TrayState {
 
     let clipboard_history_item = CheckMenuItem::with_id(
         CLIPBOARD_HISTORY_MENU_ID,
-        "复制历史 - ctrl+shift+c",
+        "复制历史 - Ctrl+Shift+C",
         true,
         settings.clipboard_history.enabled,
         None,
@@ -89,35 +96,40 @@ pub fn init_tray_icon(settings: &AppSettings) -> TrayState {
 
     let screenshot_item = CheckMenuItem::with_id(
         SCREENSHOT_MENU_ID,
-        "截图快捷键 - alt+shift+z",
+        "截图快捷键 - Alt+Shift+Z",
         true,
         settings.screenshot.enabled,
         None,
     );
     tray_menu.append(&screenshot_item).unwrap();
 
-    let text_translation_menu = Submenu::new("翻译文本 - ctrl+c", true);
-    let text_translation_zh_en_item = CheckMenuItem::with_id(
-        TEXT_TRANSLATION_ZH_EN_MENU_ID,
-        "中译英",
+    let text_translation_item = CheckMenuItem::with_id(
+        TEXT_TRANSLATION_MENU_ID,
+        "翻译文本 - Ctrl+C",
         true,
         settings.text_translation.enabled,
         None,
     );
-    let text_translation_en_zh_item = CheckMenuItem::with_id(
-        TEXT_TRANSLATION_EN_ZH_MENU_ID,
-        "英译中",
+    tray_menu.append(&text_translation_item).unwrap();
+
+    let ai_backend_menu = Submenu::new("AI 后端", true);
+    let ai_backend_local_item = CheckMenuItem::with_id(
+        AI_BACKEND_LOCAL_MENU_ID,
+        "本地模型",
         true,
-        settings.text_translation.enabled,
+        settings.ai_backend == AiBackend::Local,
         None,
     );
-    text_translation_menu
-        .append(&text_translation_zh_en_item)
-        .unwrap();
-    text_translation_menu
-        .append(&text_translation_en_zh_item)
-        .unwrap();
-    tray_menu.append(&text_translation_menu).unwrap();
+    let ai_backend_tencent_item = CheckMenuItem::with_id(
+        AI_BACKEND_TENCENT_MENU_ID,
+        "腾讯 API",
+        true,
+        settings.ai_backend == AiBackend::Tencent,
+        None,
+    );
+    ai_backend_menu.append(&ai_backend_local_item).unwrap();
+    ai_backend_menu.append(&ai_backend_tencent_item).unwrap();
+    tray_menu.append(&ai_backend_menu).unwrap();
     tray_menu.append(&PredefinedMenuItem::separator()).unwrap();
 
     let quit_item = MenuItem::with_id(QUIT_MENU_ID, "退出", true, None);
@@ -138,8 +150,9 @@ pub fn init_tray_icon(settings: &AppSettings) -> TrayState {
         copy_timestamp_item,
         clipboard_history_item,
         screenshot_item,
-        text_translation_zh_en_item,
-        text_translation_en_zh_item,
+        text_translation_item,
+        ai_backend_local_item,
+        ai_backend_tencent_item,
     }
 }
 
@@ -149,14 +162,16 @@ pub fn start_tray_event_pump(
     settings: Arc<Mutex<AppSettings>>,
     settings_store: SettingsStore,
     translation_service: Arc<TranslationService>,
+    ocr_service: Arc<OcrService>,
     show_home_window: impl Fn() + 'static,
+    on_settings_applied: impl Fn(&AppSettings) + 'static,
 ) -> slint::Timer {
     let tray_timer = slint::Timer::default();
     let copy_timestamp_item = tray_state.copy_timestamp_item.clone();
     let clipboard_history_item = tray_state.clipboard_history_item.clone();
     let screenshot_item = tray_state.screenshot_item.clone();
-    let text_translation_zh_en_item = tray_state.text_translation_zh_en_item.clone();
-    let text_translation_en_zh_item = tray_state.text_translation_en_zh_item.clone();
+    let text_translation_item = tray_state.text_translation_item.clone();
+    let tray_menu_handles = tray_state.menu_handles();
 
     tray_timer.start(
         slint::TimerMode::Repeated,
@@ -176,59 +191,66 @@ pub fn start_tray_event_pump(
             while let Ok(event) = MenuEvent::receiver().try_recv() {
                 info!("menu event: {event:?}");
 
-                if event.id.as_ref() == COPY_TIMESTAMP_MENU_ID {
-                    let checked = copy_timestamp_item.is_checked();
-                    if let Ok(mut settings) = settings.lock() {
-                        settings.copy_timestamp.enabled = checked;
-                        save_settings(&settings_store, &settings);
-                    }
+                let updated_settings = if event.id.as_ref() == COPY_TIMESTAMP_MENU_ID {
+                    update_settings_snapshot(&settings, |settings| {
+                        settings.copy_timestamp.enabled = copy_timestamp_item.is_checked();
+                    })
                 } else if event.id.as_ref() == CLIPBOARD_HISTORY_MENU_ID {
-                    let checked = clipboard_history_item.is_checked();
-                    if let Ok(mut settings) = settings.lock() {
-                        settings.clipboard_history.enabled = checked;
-                        save_settings(&settings_store, &settings);
-                    }
+                    update_settings_snapshot(&settings, |settings| {
+                        settings.clipboard_history.enabled = clipboard_history_item.is_checked();
+                    })
                 } else if event.id.as_ref() == SCREENSHOT_MENU_ID {
-                    let checked = screenshot_item.is_checked();
-                    if let Ok(mut settings) = settings.lock() {
-                        settings.screenshot.enabled = checked;
-                        save_settings(&settings_store, &settings);
-                    }
-                } else if event.id.as_ref() == TEXT_TRANSLATION_ZH_EN_MENU_ID {
-                    let checked = text_translation_zh_en_item.is_checked();
-                    if let Ok(mut settings) = settings.lock() {
-                        settings.text_translation.enabled = checked;
-                        text_translation_zh_en_item.set_checked(checked);
-                        text_translation_en_zh_item.set_checked(checked);
-                        translation_service.apply_settings(
-                            &settings.text_translation,
-                            settings.ai_backend,
-                            &settings.tencent_cloud,
-                        );
-                        save_settings(&settings_store, &settings);
-                    }
-                } else if event.id.as_ref() == TEXT_TRANSLATION_EN_ZH_MENU_ID {
-                    let checked = text_translation_en_zh_item.is_checked();
-                    if let Ok(mut settings) = settings.lock() {
-                        settings.text_translation.enabled = checked;
-                        text_translation_zh_en_item.set_checked(checked);
-                        text_translation_en_zh_item.set_checked(checked);
-                        translation_service.apply_settings(
-                            &settings.text_translation,
-                            settings.ai_backend,
-                            &settings.tencent_cloud,
-                        );
-                        save_settings(&settings_store, &settings);
-                    }
+                    update_settings_snapshot(&settings, |settings| {
+                        settings.screenshot.enabled = screenshot_item.is_checked();
+                    })
+                } else if event.id.as_ref() == TEXT_TRANSLATION_MENU_ID {
+                    update_settings_snapshot(&settings, |settings| {
+                        settings.text_translation.enabled = text_translation_item.is_checked();
+                    })
+                } else if event.id.as_ref() == AI_BACKEND_LOCAL_MENU_ID {
+                    update_settings_snapshot(&settings, |settings| {
+                        settings.ai_backend = AiBackend::Local;
+                    })
+                } else if event.id.as_ref() == AI_BACKEND_TENCENT_MENU_ID {
+                    update_settings_snapshot(&settings, |settings| {
+                        settings.ai_backend = AiBackend::Tencent;
+                    })
                 } else if event.id.as_ref() == QUIT_MENU_ID {
                     info!("quit application");
                     request_application_quit();
                     break;
+                } else {
+                    None
+                };
+
+                if let Some(settings) = updated_settings {
+                    save_settings(&settings_store, &settings);
+                    tray_menu_handles.sync_from_settings(&settings);
+                    translation_service.apply_settings(
+                        &settings.text_translation,
+                        settings.ai_backend,
+                        &settings.tencent_cloud,
+                    );
+                    ocr_service.apply_settings(
+                        &settings.image_recognition,
+                        settings.ai_backend,
+                        &settings.tencent_cloud,
+                    );
+                    on_settings_applied(&settings);
                 }
             }
         },
     );
     tray_timer
+}
+
+fn update_settings_snapshot(
+    settings: &Arc<Mutex<AppSettings>>,
+    update: impl FnOnce(&mut AppSettings),
+) -> Option<AppSettings> {
+    let mut settings = settings.lock().ok()?;
+    update(&mut settings);
+    Some(settings.clone())
 }
 
 fn save_settings(settings_store: &SettingsStore, settings: &AppSettings) {

@@ -1,5 +1,6 @@
 //! Application bootstrap and cross-feature event wiring.
 
+use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -132,6 +133,7 @@ pub fn run() {
         Arc::clone(&translation_service),
         Arc::clone(&ocr_service),
         tray_state.menu_handles(),
+        Rc::new(|_| {}),
     );
     let home_window = init_home_window(
         &time_trans_window,
@@ -286,6 +288,7 @@ pub fn run() {
         Arc::clone(&settings),
         settings_store,
         translation_service,
+        ocr_service,
         {
             let weak_home_window = home_window.as_weak();
             move || {
@@ -294,6 +297,7 @@ pub fn run() {
                 }
             }
         },
+        |_| {},
     );
     let _model_cleanup_timer = model_cleanup_timer;
     slint::run_event_loop_until_quit().unwrap();
