@@ -5,11 +5,14 @@ edition = "2024"
 
 [dependencies]
 slint = { version = "1.15.1", features = ["renderer-skia"] }
+base64 = "0.22"
 chrono = { version = "0.4", default-features = false, features = ["serde", "clock", "std"] }
 chrono-tz = "0.10.3"
 rdev = "0.5.3"
 log = "0.4.27"
 flexi_logger = "0.23"
+hex = "0.4"
+hmac = "0.12"
 image = { version = "0.24", default-features = false, features = ["png", "jpeg"] }
 imageproc = "0.23"
 rusttype = "0.9"
@@ -30,10 +33,12 @@ single-instance = "0.3"
 dirs = "6.0.0"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0"
+sha2 = "0.10"
 toml = "0.8.2"
 tokenizers = "0.23.1"
 ort = "2.0.0-rc.12"
 rfd = "0.15.4"
+ureq = { version = "2.12", features = ["json", "tls"] }
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.52"

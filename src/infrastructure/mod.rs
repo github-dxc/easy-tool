@@ -5,4 +5,5 @@ pub mod global_input;
 pub mod idle_model;
 pub mod logging;
 pub mod paths;
+pub mod tencent_cloud;
 pub mod tray;
