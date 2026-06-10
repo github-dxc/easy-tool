@@ -499,9 +499,11 @@ fn undo_stack_byte_len(stack: &[RgbaImage]) -> usize {
 }
 
 fn trim_undo_stack(stack: &mut Vec<RgbaImage>) {
-    while stack.len() > MAX_UNDO_SNAPSHOTS
-        || stack.len() > 1 && undo_stack_byte_len(stack) > MAX_UNDO_BYTES
-    {
+    trim_undo_stack_with_limits(stack, MAX_UNDO_SNAPSHOTS, MAX_UNDO_BYTES);
+}
+
+fn trim_undo_stack_with_limits(stack: &mut Vec<RgbaImage>, max_snapshots: usize, max_bytes: usize) {
+    while stack.len() > max_snapshots || stack.len() > 1 && undo_stack_byte_len(stack) > max_bytes {
         if stack.len() <= 1 {
             break;
         }
@@ -919,7 +921,9 @@ fn capture_screen() -> Result<ScreenshotSession, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{MAX_UNDO_BYTES, MAX_UNDO_SNAPSHOTS, trim_undo_stack, undo_stack_byte_len};
+    use super::{
+        MAX_UNDO_SNAPSHOTS, trim_undo_stack, trim_undo_stack_with_limits, undo_stack_byte_len,
+    };
     use image::RgbaImage;
 
     #[test]
@@ -935,26 +939,25 @@ mod tests {
 
     #[test]
     fn trim_undo_stack_limits_total_bytes() {
-        let side = 3000;
         let mut stack = vec![
             RgbaImage::new(1, 1),
-            RgbaImage::new(side, side),
-            RgbaImage::new(side, side),
+            RgbaImage::new(4, 4),
+            RgbaImage::new(4, 4),
         ];
 
-        trim_undo_stack(&mut stack);
+        trim_undo_stack_with_limits(&mut stack, 8, 100);
 
-        assert!(undo_stack_byte_len(&stack) <= MAX_UNDO_BYTES);
+        assert_eq!(stack.len(), 1);
+        assert!(undo_stack_byte_len(&stack) <= 100);
     }
 
     #[test]
     fn trim_undo_stack_keeps_one_large_snapshot() {
-        let side = 5000;
-        let mut stack = vec![RgbaImage::new(side, side)];
+        let mut stack = vec![RgbaImage::new(8, 8)];
 
-        trim_undo_stack(&mut stack);
+        trim_undo_stack_with_limits(&mut stack, 8, 100);
 
         assert_eq!(stack.len(), 1);
-        assert!(undo_stack_byte_len(&stack) > MAX_UNDO_BYTES);
+        assert!(undo_stack_byte_len(&stack) > 100);
     }
 }
