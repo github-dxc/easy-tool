@@ -97,7 +97,7 @@ mod tests {
     fn hashed_payload_returns_lowercase_sha256_hex() {
         assert_eq!(
             hashed_payload("{}"),
-            "44136fa355b3678a1146ad16f7e8649e94fb4f7c4dbe2dc8aebe1c9e820d0d5"
+            "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
         );
     }
 
