@@ -36,14 +36,14 @@ const REPETITION_PENALTY: f32 = 1.2;
 /// Owns lightweight translation state and loads the model on first use.
 pub struct TranslationService {
     state: Mutex<TranslationState>,
+    zh_to_en_model: Mutex<IdleModel<TranslationModel>>,
+    en_to_zh_model: Mutex<IdleModel<TranslationModel>>,
 }
 
 struct TranslationState {
     enabled: bool,
     ai_backend: AiBackend,
     tencent_cloud: TencentCloudSettings,
-    zh_to_en_model: IdleModel<TranslationModel>,
-    en_to_zh_model: IdleModel<TranslationModel>,
 }
 
 struct TranslationModel {
@@ -69,9 +69,9 @@ impl TranslationService {
                 enabled: false,
                 ai_backend,
                 tencent_cloud: tencent_cloud.clone(),
-                zh_to_en_model: IdleModel::empty(),
-                en_to_zh_model: IdleModel::empty(),
             }),
+            zh_to_en_model: Mutex::new(IdleModel::empty()),
+            en_to_zh_model: Mutex::new(IdleModel::empty()),
         };
         service.apply_settings(settings, ai_backend, tencent_cloud);
         service
@@ -90,8 +90,9 @@ impl TranslationService {
 
         if !settings.enabled {
             state.enabled = false;
-            state.zh_to_en_model.unload_now();
-            state.en_to_zh_model.unload_now();
+            drop(state);
+            self.zh_to_en_model.lock().unwrap().unload_now();
+            self.en_to_zh_model.lock().unwrap().unload_now();
             return;
         }
 
@@ -123,19 +124,22 @@ impl TranslationService {
             return Ok(String::new());
         };
 
-        let mut state = self.state.lock().unwrap();
-        if !state.enabled {
-            return Err("text translation is disabled".into());
-        }
+        let tencent_cloud = {
+            let state = self.state.lock().unwrap();
+            if !state.enabled {
+                return Err("text translation is disabled".into());
+            }
 
-        if state.ai_backend == AiBackend::Tencent {
-            let tencent_cloud = state.tencent_cloud.clone();
-            drop(state);
+            match state.ai_backend {
+                AiBackend::Tencent => Some(state.tencent_cloud.clone()),
+                AiBackend::Local => None,
+            }
+        };
 
+        if let Some(tencent_cloud) = tencent_cloud {
             if should_cancel() {
                 return Ok(String::new());
             }
-
             let translated = translate_text_with_tencent(
                 &tencent_cloud,
                 backend_direction_for(direction),
@@ -148,7 +152,7 @@ impl TranslationService {
         }
 
         let model_path = local_model_path_for_direction(direction);
-        let model = local_model_for_direction(&mut state, direction);
+        let mut model = self.local_model_for_direction(direction).lock().unwrap();
         let result = model
             .get_or_try_load(|| TranslationModel::load(&model_path))?
             .translate_streaming(text, on_partial, should_cancel);
@@ -157,26 +161,27 @@ impl TranslationService {
     }
 
     pub fn unload_if_idle(&self) {
-        let Ok(mut state) = self.state.try_lock() else {
-            return;
-        };
         let now = Instant::now();
-        if state.zh_to_en_model.unload_if_idle(now) {
-            log::info!("unloaded idle zh->en translation model");
+        if let Ok(mut model) = self.zh_to_en_model.try_lock() {
+            if model.unload_if_idle(now) {
+                log::info!("unloaded idle zh->en translation model");
+            }
         }
-        if state.en_to_zh_model.unload_if_idle(now) {
-            log::info!("unloaded idle en->zh translation model");
+        if let Ok(mut model) = self.en_to_zh_model.try_lock() {
+            if model.unload_if_idle(now) {
+                log::info!("unloaded idle en->zh translation model");
+            }
         }
     }
-}
 
-fn local_model_for_direction(
-    state: &mut TranslationState,
-    direction: DetectedTranslationDirection,
-) -> &mut IdleModel<TranslationModel> {
-    match direction {
-        DetectedTranslationDirection::ZhToEn => &mut state.zh_to_en_model,
-        DetectedTranslationDirection::EnToZh => &mut state.en_to_zh_model,
+    fn local_model_for_direction(
+        &self,
+        direction: DetectedTranslationDirection,
+    ) -> &Mutex<IdleModel<TranslationModel>> {
+        match direction {
+            DetectedTranslationDirection::ZhToEn => &self.zh_to_en_model,
+            DetectedTranslationDirection::EnToZh => &self.en_to_zh_model,
+        }
     }
 }
 
@@ -621,13 +626,15 @@ fn banned_repeated_ngram_tokens(generated_ids: &[i64], ngram_size: usize) -> Vec
 #[cfg(test)]
 mod tests {
     use super::{
-        MAX_DECODER_SEQUENCE_LEN, MIN_DECODER_SEQUENCE_LEN, backend_direction_for,
-        banned_repeated_ngram_tokens, decoder_sequence_len_for_source, join_translated_chunks,
-        local_model_path_for_direction, repetition_adjusted_score, split_text_segments,
+        MAX_DECODER_SEQUENCE_LEN, MIN_DECODER_SEQUENCE_LEN, TranslationService,
+        backend_direction_for, banned_repeated_ngram_tokens, decoder_sequence_len_for_source,
+        join_translated_chunks, local_model_path_for_direction, repetition_adjusted_score,
+        split_text_segments,
     };
     use crate::features::text_translation::language::DetectedTranslationDirection;
     use crate::infrastructure::tencent_cloud::client::TencentTranslationDirection;
     use crate::settings::{
+        AiBackend, TencentCloudSettings, TextTranslationSettings,
         default_en_to_zh_translation_model_path, default_zh_to_en_translation_model_path,
     };
 
@@ -670,6 +677,20 @@ mod tests {
             backend_direction_for(DetectedTranslationDirection::EnToZh),
             TencentTranslationDirection::EnToZh
         ));
+    }
+
+    #[test]
+    fn returns_empty_for_text_without_detected_direction() {
+        let service = TranslationService::new(
+            &TextTranslationSettings {
+                enabled: true,
+                debounce_seconds: 1,
+            },
+            AiBackend::Local,
+            &TencentCloudSettings::default(),
+        );
+
+        assert_eq!(service.translate("123, !?"), Ok(String::new()));
     }
 
     #[test]

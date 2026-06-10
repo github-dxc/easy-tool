@@ -15,6 +15,10 @@ pub fn detect_translation_direction(text: &str) -> Option<DetectedTranslationDir
         .filter(|character| character.is_ascii_alphabetic())
         .count();
 
+    if chinese_count == 0 && english_count == 0 {
+        return None;
+    }
+
     if chinese_count > english_count || chinese_count == english_count && chinese_count > 0 {
         Some(DetectedTranslationDirection::ZhToEn)
     } else {
@@ -79,10 +83,7 @@ mod tests {
     }
 
     #[test]
-    fn defaults_punctuation_and_numbers_to_en_to_zh() {
-        assert_eq!(
-            detect_translation_direction("123, !?"),
-            Some(DetectedTranslationDirection::EnToZh)
-        );
+    fn returns_none_for_punctuation_and_numbers() {
+        assert_eq!(detect_translation_direction("123, !?"), None);
     }
 }

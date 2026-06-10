@@ -42,6 +42,7 @@ const MAX_GENERATED_TOKENS: usize = 512;
 /// Owns the loaded OCR model and reloads it when settings change.
 pub struct OcrService {
     state: Mutex<OcrState>,
+    model: Mutex<IdleModel<OcrModel>>,
 }
 
 struct OcrState {
@@ -49,7 +50,6 @@ struct OcrState {
     ai_backend: AiBackend,
     tencent_cloud: TencentCloudSettings,
     model_path: Option<PathBuf>,
-    model: IdleModel<OcrModel>,
 }
 
 struct OcrModel {
@@ -89,8 +89,8 @@ impl OcrService {
                 ai_backend,
                 tencent_cloud: tencent_cloud.clone(),
                 model_path: None,
-                model: IdleModel::empty(),
             }),
+            model: Mutex::new(IdleModel::empty()),
         };
         service.apply_settings(settings, ai_backend, tencent_cloud);
         service
@@ -107,18 +107,22 @@ impl OcrService {
         state.tencent_cloud = tencent_cloud.clone();
 
         let model_path = settings.model_dir.clone();
-        if state.model_path != model_path {
-            state.model_path = model_path;
-            state.model.unload_now();
-        }
+        let model_path_changed = state.model_path != model_path;
+        state.model_path = model_path;
 
         if !settings.enabled {
             state.enabled = false;
-            state.model.unload_now();
+            drop(state);
+            self.model.lock().unwrap().unload_now();
             return;
         }
 
         state.enabled = true;
+        drop(state);
+
+        if model_path_changed {
+            self.model.lock().unwrap().unload_now();
+        }
     }
 
     pub fn recognize(&self, image_path: &Path) -> Result<String, String> {
@@ -130,44 +134,54 @@ impl OcrService {
         image_path: &Path,
         mut on_partial: impl FnMut(&str),
     ) -> Result<String, String> {
-        let mut state = self.state.lock().unwrap();
-        if !state.enabled {
-            return Err("图像识别已关闭".into());
-        }
-
-        if state.ai_backend == AiBackend::Tencent {
-            let tencent_cloud = state.tencent_cloud.clone();
-            drop(state);
-
-            let recognized = recognize_image_with_tencent(&tencent_cloud, image_path)?;
-            if !recognized.is_empty() {
-                on_partial(&recognized);
+        let request = {
+            let state = self.state.lock().unwrap();
+            if !state.enabled {
+                return Err("图像识别已关闭".into());
             }
-            return Ok(recognized);
-        }
 
-        let model_path = state
-            .model_path
-            .clone()
-            .ok_or_else(|| "请先在设置页配置 OCR 模型目录".to_string())?;
-        let result = {
-            let model = state
-                .model
-                .get_or_try_load(|| OcrModel::load(&model_path))?;
-            model.recognize_streaming(image_path, on_partial)
+            match state.ai_backend {
+                AiBackend::Tencent => OcrRequest::Tencent(state.tencent_cloud.clone()),
+                AiBackend::Local => OcrRequest::Local(
+                    state
+                        .model_path
+                        .clone()
+                        .ok_or_else(|| "请先在设置页配置 OCR 模型目录".to_string())?,
+                ),
+            }
         };
-        state.model.refresh_idle_deadline(Instant::now());
-        result
+
+        match request {
+            OcrRequest::Tencent(tencent_cloud) => {
+                let recognized = recognize_image_with_tencent(&tencent_cloud, image_path)?;
+                if !recognized.is_empty() {
+                    on_partial(&recognized);
+                }
+                Ok(recognized)
+            }
+            OcrRequest::Local(model_path) => {
+                let mut model = self.model.lock().unwrap();
+                let result = model
+                    .get_or_try_load(|| OcrModel::load(&model_path))?
+                    .recognize_streaming(image_path, on_partial);
+                model.refresh_idle_deadline(Instant::now());
+                result
+            }
+        }
     }
 
     pub fn unload_if_idle(&self) {
-        let Ok(mut state) = self.state.try_lock() else {
-            return;
-        };
-        if state.model.unload_if_idle(Instant::now()) {
-            log::info!("unloaded idle OCR model");
+        if let Ok(mut model) = self.model.try_lock() {
+            if model.unload_if_idle(Instant::now()) {
+                log::info!("unloaded idle OCR model");
+            }
         }
     }
+}
+
+enum OcrRequest {
+    Tencent(TencentCloudSettings),
+    Local(PathBuf),
 }
 impl OcrModel {
     fn load(path: &Path) -> Result<Self, String> {
