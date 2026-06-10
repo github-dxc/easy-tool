@@ -8,6 +8,10 @@ use serde::{Deserialize, Serialize};
 /// Top-level user preferences used by tray toggles and runtime features.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppSettings {
+    #[serde(default)]
+    pub ai_backend: AiBackend,
+    #[serde(default)]
+    pub tencent_cloud: TencentCloudSettings,
     #[serde(default = "default_enabled_copy_timestamp")]
     pub copy_timestamp: CopyTimestampSettings,
     #[serde(default = "default_enabled_clipboard_history")]
@@ -46,30 +50,37 @@ pub struct ImageRecognitionSettings {
     pub model_dir: Option<PathBuf>,
 }
 
-/// Controls copy-triggered text translation and model loading.
+/// Selects the backend used by AI-powered features.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum AiBackend {
+    #[default]
+    Local,
+    Tencent,
+}
+
+/// Tencent Cloud credentials used when the Tencent backend is selected.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct TencentCloudSettings {
+    #[serde(default)]
+    pub secret_id: String,
+    #[serde(default)]
+    pub secret_key: String,
+}
+
+/// Controls copy-triggered text translation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TextTranslationSettings {
     pub enabled: bool,
-    #[serde(default)]
-    pub direction: TranslationDirection,
     #[serde(default = "default_text_translation_debounce_seconds")]
     pub debounce_seconds: u64,
-    #[serde(default)]
-    pub zh_to_en_model_dir: Option<PathBuf>,
-    #[serde(default)]
-    pub en_to_zh_model_dir: Option<PathBuf>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum TranslationDirection {
-    ZhToEn,
-    EnToZh,
 }
 
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
+            ai_backend: AiBackend::default(),
+            tencent_cloud: TencentCloudSettings::default(),
             copy_timestamp: CopyTimestampSettings { enabled: true },
             clipboard_history: ClipboardHistorySettings { enabled: true },
             screenshot: ScreenshotSettings { enabled: true },
@@ -111,10 +122,7 @@ impl Default for TextTranslationSettings {
     fn default() -> Self {
         Self {
             enabled: false,
-            direction: TranslationDirection::ZhToEn,
             debounce_seconds: default_text_translation_debounce_seconds(),
-            zh_to_en_model_dir: None,
-            en_to_zh_model_dir: None,
         }
     }
 }
@@ -123,38 +131,11 @@ fn default_text_translation_debounce_seconds() -> u64 {
     1
 }
 
-impl Default for TranslationDirection {
-    fn default() -> Self {
-        Self::ZhToEn
-    }
-}
-
 impl ImageRecognitionSettings {
     pub fn model_path(&self) -> PathBuf {
         self.model_dir
             .clone()
             .unwrap_or_else(default_image_recognition_model_path)
-    }
-}
-
-impl TextTranslationSettings {
-    pub fn model_path(&self) -> PathBuf {
-        match self.direction {
-            TranslationDirection::ZhToEn => self.zh_to_en_model_path(),
-            TranslationDirection::EnToZh => self.en_to_zh_model_path(),
-        }
-    }
-
-    pub fn zh_to_en_model_path(&self) -> PathBuf {
-        self.zh_to_en_model_dir
-            .clone()
-            .unwrap_or_else(default_zh_to_en_translation_model_path)
-    }
-
-    pub fn en_to_zh_model_path(&self) -> PathBuf {
-        self.en_to_zh_model_dir
-            .clone()
-            .unwrap_or_else(default_en_to_zh_translation_model_path)
     }
 }
 
@@ -209,14 +190,14 @@ fn default_config_path() -> PathBuf {
         .join("config.toml")
 }
 
-fn default_zh_to_en_translation_model_path() -> PathBuf {
+pub(crate) fn default_zh_to_en_translation_model_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("resource")
         .join("Xenova")
         .join("opus-mt-zh-en")
 }
 
-fn default_en_to_zh_translation_model_path() -> PathBuf {
+pub(crate) fn default_en_to_zh_translation_model_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("resource")
         .join("Xenova")
@@ -227,4 +208,43 @@ fn default_image_recognition_model_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("resource")
         .join("image-recognition")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn missing_backend_fields_default_to_local_with_empty_tencent_credentials() {
+        let settings: AppSettings = toml::from_str(
+            r#"
+[text_translation]
+enabled = true
+debounce_seconds = 3
+"#,
+        )
+        .expect("settings should deserialize without backend fields");
+
+        assert_eq!(settings.ai_backend, AiBackend::Local);
+        assert_eq!(settings.tencent_cloud.secret_id, "");
+        assert_eq!(settings.tencent_cloud.secret_key, "");
+    }
+
+    #[test]
+    fn legacy_text_translation_fields_do_not_break_deserialization() {
+        let settings: AppSettings = toml::from_str(
+            r#"
+[text_translation]
+enabled = true
+debounce_seconds = 5
+direction = "en_to_zh"
+zh_to_en_model_dir = "resource/Xenova/opus-mt-zh-en"
+en_to_zh_model_dir = "resource/Xenova/opus-mt-en-zh"
+"#,
+        )
+        .expect("legacy text translation settings should deserialize");
+
+        assert!(settings.text_translation.enabled);
+        assert_eq!(settings.text_translation.debounce_seconds, 5);
+    }
 }
