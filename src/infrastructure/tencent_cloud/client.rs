@@ -17,7 +17,7 @@ const TMT_ACTION_TEXT_TRANSLATE: &str = "TextTranslate";
 const OCR_HOST: &str = "ocr.tencentcloudapi.com";
 const OCR_SERVICE: &str = "ocr";
 const OCR_VERSION: &str = "2018-11-19";
-const OCR_ACTION_GENERAL_BASIC: &str = "GeneralBasicOCR";
+const OCR_ACTION_GENERAL_BASIC: &str = "RecognizeAgent";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
 const HTTP_ERROR_BODY_LIMIT: usize = 512;
 

@@ -14,7 +14,7 @@ use tokenizers::Tokenizer;
 
 use crate::infrastructure::idle_model::IdleModel;
 use crate::infrastructure::tencent_cloud::client::recognize_image as recognize_image_with_tencent;
-use crate::settings::{AiBackend, ImageRecognitionSettings, TencentCloudSettings};
+use crate::settings::{AiBackend, TencentCloudSettings};
 
 const BOS_TOKEN: &str = "<|begin_of_sentence|>";
 const IMAGE_START_TOKEN: &str = "<|IMAGE_START|>";
@@ -46,10 +46,9 @@ pub struct OcrService {
 }
 
 struct OcrState {
-    enabled: bool,
     ai_backend: AiBackend,
     tencent_cloud: TencentCloudSettings,
-    model_path: Option<PathBuf>,
+    model_path: PathBuf,
 }
 
 struct OcrModel {
@@ -84,26 +83,25 @@ struct DecoderLayerCache {
 
 impl OcrService {
     pub fn new(
-        settings: &ImageRecognitionSettings,
+        model_path: PathBuf,
         ai_backend: AiBackend,
         tencent_cloud: &TencentCloudSettings,
     ) -> Self {
         let service = Self {
             state: Mutex::new(OcrState {
-                enabled: false,
                 ai_backend,
                 tencent_cloud: tencent_cloud.clone(),
-                model_path: None,
+                model_path: model_path.clone(),
             }),
             model: Mutex::new(OcrModelSlot::empty()),
         };
-        service.apply_settings(settings, ai_backend, tencent_cloud);
+        service.apply_settings(model_path, ai_backend, tencent_cloud);
         service
     }
 
     pub fn apply_settings(
         &self,
-        settings: &ImageRecognitionSettings,
+        model_path: PathBuf,
         ai_backend: AiBackend,
         tencent_cloud: &TencentCloudSettings,
     ) {
@@ -111,18 +109,8 @@ impl OcrService {
         state.ai_backend = ai_backend;
         state.tencent_cloud = tencent_cloud.clone();
 
-        let model_path = settings.model_dir.clone();
         let model_path_changed = state.model_path != model_path;
         state.model_path = model_path;
-
-        if !settings.enabled {
-            state.enabled = false;
-            drop(state);
-            self.try_unload_model();
-            return;
-        }
-
-        state.enabled = true;
         drop(state);
 
         if model_path_changed {
@@ -141,18 +129,9 @@ impl OcrService {
     ) -> Result<String, String> {
         let request = {
             let state = self.state.lock().unwrap();
-            if !state.enabled {
-                return Err("图像识别已关闭".into());
-            }
-
             match state.ai_backend {
                 AiBackend::Tencent => OcrRequest::Tencent(state.tencent_cloud.clone()),
-                AiBackend::Local => OcrRequest::Local(
-                    state
-                        .model_path
-                        .clone()
-                        .ok_or_else(|| "请先在设置页配置 OCR 模型目录".to_string())?,
-                ),
+                AiBackend::Local => OcrRequest::Local(state.model_path.clone()),
             }
         };
 

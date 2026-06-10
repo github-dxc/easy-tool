@@ -20,8 +20,8 @@ pub struct AppSettings {
     pub screenshot: ScreenshotSettings,
     #[serde(default)]
     pub text_translation: TextTranslationSettings,
-    #[serde(default = "default_enabled_image_recognition")]
-    pub image_recognition: ImageRecognitionSettings,
+    #[serde(default)]
+    pub image_recognition_model_dir: Option<PathBuf>,
 }
 
 /// Controls whether copied timestamps show the floating conversion window.
@@ -40,14 +40,6 @@ pub struct ClipboardHistorySettings {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScreenshotSettings {
     pub enabled: bool,
-}
-
-/// Controls image text recognition and model loading.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ImageRecognitionSettings {
-    pub enabled: bool,
-    #[serde(default)]
-    pub model_dir: Option<PathBuf>,
 }
 
 /// Selects the backend used by AI-powered features.
@@ -89,7 +81,7 @@ impl Default for AppSettings {
             clipboard_history: ClipboardHistorySettings { enabled: true },
             screenshot: ScreenshotSettings { enabled: true },
             text_translation: TextTranslationSettings::default(),
-            image_recognition: ImageRecognitionSettings::default(),
+            image_recognition_model_dir: None,
         }
     }
 }
@@ -104,22 +96,6 @@ fn default_enabled_clipboard_history() -> ClipboardHistorySettings {
 
 fn default_enabled_screenshot() -> ScreenshotSettings {
     ScreenshotSettings { enabled: true }
-}
-
-fn default_enabled_image_recognition() -> ImageRecognitionSettings {
-    ImageRecognitionSettings {
-        enabled: true,
-        model_dir: None,
-    }
-}
-
-impl Default for ImageRecognitionSettings {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            model_dir: None,
-        }
-    }
 }
 
 impl Default for TextTranslationSettings {
@@ -137,14 +113,6 @@ fn default_text_translation_debounce_seconds() -> u64 {
     1
 }
 
-impl ImageRecognitionSettings {
-    pub fn model_path(&self) -> PathBuf {
-        self.model_dir
-            .clone()
-            .unwrap_or_else(default_image_recognition_model_path)
-    }
-}
-
 impl TextTranslationSettings {
     pub fn zh_to_en_model_path(&self) -> PathBuf {
         self.zh_to_en_model_dir
@@ -156,6 +124,14 @@ impl TextTranslationSettings {
         self.en_to_zh_model_dir
             .clone()
             .unwrap_or_else(default_en_to_zh_translation_model_path)
+    }
+}
+
+impl AppSettings {
+    pub fn image_recognition_model_path(&self) -> PathBuf {
+        self.image_recognition_model_dir
+            .clone()
+            .unwrap_or_else(default_image_recognition_model_path)
     }
 }
 
@@ -185,8 +161,9 @@ impl SettingsStore {
 
         let content =
             fs::read_to_string(&self.path).map_err(|err| format!("read settings failed: {err}"))?;
-        let settings: AppSettings =
+        let mut settings: AppSettings =
             toml::from_str(&content).map_err(|err| format!("parse settings failed: {err}"))?;
+        migrate_legacy_image_recognition_model_dir(&content, &mut settings);
 
         Ok(settings)
     }
@@ -208,6 +185,27 @@ fn default_config_path() -> PathBuf {
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
         .join("easy-tool")
         .join("config.toml")
+}
+
+fn migrate_legacy_image_recognition_model_dir(content: &str, settings: &mut AppSettings) {
+    if settings.image_recognition_model_dir.is_some() {
+        return;
+    }
+
+    let Ok(value) = toml::from_str::<toml::Value>(content) else {
+        return;
+    };
+    let Some(model_dir) = value
+        .get("image_recognition")
+        .and_then(|value| value.get("model_dir"))
+        .and_then(toml::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return;
+    };
+
+    settings.image_recognition_model_dir = Some(PathBuf::from(model_dir));
 }
 
 pub(crate) fn default_zh_to_en_translation_model_path() -> PathBuf {
@@ -235,7 +233,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn missing_backend_fields_default_to_local_with_empty_tencent_credentials() {
+    fn missing_backend_fields_default_to_tencent_with_empty_tencent_credentials() {
         let settings: AppSettings = toml::from_str(
             r#"
 [text_translation]
@@ -248,6 +246,33 @@ debounce_seconds = 3
         assert_eq!(settings.ai_backend, AiBackend::Tencent);
         assert_eq!(settings.tencent_cloud.secret_id, "");
         assert_eq!(settings.tencent_cloud.secret_key, "");
+    }
+
+    #[test]
+    fn legacy_image_recognition_model_dir_migrates_to_top_level() {
+        let input = r#"
+[image_recognition]
+enabled = true
+model_dir = "resource/image-recognition"
+"#;
+        let mut settings: AppSettings = toml::from_str(input).unwrap();
+
+        migrate_legacy_image_recognition_model_dir(input, &mut settings);
+
+        assert_eq!(
+            settings.image_recognition_model_dir,
+            Some(PathBuf::from("resource/image-recognition"))
+        );
+    }
+
+    #[test]
+    fn saved_settings_do_not_include_legacy_image_recognition_table() {
+        let settings = AppSettings::default();
+
+        let content = toml::to_string_pretty(&settings).unwrap();
+
+        assert!(!content.contains("[image_recognition]"));
+        assert!(!content.contains("enabled = true\nmodel_dir"));
     }
 
     #[test]

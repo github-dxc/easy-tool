@@ -13,8 +13,7 @@ use crate::infrastructure::tray::TrayMenuHandles;
 use crate::platform::dialog::{open_folder_dialog, show_message_box};
 use crate::platform::window::activate_slint_window;
 use crate::settings::{
-    AiBackend, AppSettings, ImageRecognitionSettings, SettingsStore, TencentCloudSettings,
-    TextTranslationSettings,
+    AiBackend, AppSettings, SettingsStore, TencentCloudSettings, TextTranslationSettings,
 };
 
 pub fn init_settings_window(
@@ -130,7 +129,6 @@ pub fn init_settings_window(
             move |copy_timestamp_enabled,
                   clipboard_history_enabled,
                   screenshot_enabled,
-                  image_recognition_enabled,
                   text_translation_enabled,
                   tencent_backend_enabled,
                   tencent_secret_id,
@@ -150,7 +148,6 @@ pub fn init_settings_window(
                     copy_timestamp_enabled,
                     clipboard_history_enabled,
                     screenshot_enabled,
-                    image_recognition_enabled,
                     text_translation_enabled,
                     tencent_backend_enabled,
                     &tencent_secret_id,
@@ -180,15 +177,13 @@ pub fn show_settings_window(window: &SettingsWindow, settings: &AppSettings) {
     window.set_copy_timestamp_enabled(settings.copy_timestamp.enabled);
     window.set_clipboard_history_enabled(settings.clipboard_history.enabled);
     window.set_screenshot_enabled(settings.screenshot.enabled);
-    window.set_image_recognition_enabled(settings.image_recognition.enabled);
     window.set_text_translation_enabled(settings.text_translation.enabled);
     window.set_tencent_backend_enabled(settings.ai_backend == AiBackend::Local);
     window.set_tencent_secret_id(settings.tencent_cloud.secret_id.clone().into());
     window.set_tencent_secret_key(settings.tencent_cloud.secret_key.clone().into());
     window.set_image_recognition_model_dir(
         settings
-            .image_recognition
-            .model_dir
+            .image_recognition_model_dir
             .as_ref()
             .map(|path| path.to_string_lossy().to_string())
             .unwrap_or_default()
@@ -268,7 +263,6 @@ fn apply_from_window(
         window.get_copy_timestamp_enabled(),
         window.get_clipboard_history_enabled(),
         window.get_screenshot_enabled(),
-        window.get_image_recognition_enabled(),
         window.get_text_translation_enabled(),
         window.get_tencent_backend_enabled(),
         &window.get_tencent_secret_id(),
@@ -290,7 +284,6 @@ fn apply_settings_snapshot(
     copy_timestamp_enabled: bool,
     clipboard_history_enabled: bool,
     screenshot_enabled: bool,
-    image_recognition_enabled: bool,
     text_translation_enabled: bool,
     tencent_backend_enabled: bool,
     tencent_secret_id: &str,
@@ -315,11 +308,6 @@ fn apply_settings_snapshot(
         en_to_zh_model_dir: path_from_string(text_translation_en_to_zh_model_dir),
         debounce_seconds: debounce_seconds_from_string(text_translation_debounce_seconds),
     };
-    let new_image_recognition = ImageRecognitionSettings {
-        enabled: image_recognition_enabled,
-        model_dir: path_from_string(image_recognition_model_dir),
-    };
-
     let updated_settings = {
         let mut settings = settings.lock().unwrap();
         settings.ai_backend = ai_backend;
@@ -327,7 +315,7 @@ fn apply_settings_snapshot(
         settings.copy_timestamp.enabled = copy_timestamp_enabled;
         settings.clipboard_history.enabled = clipboard_history_enabled;
         settings.screenshot.enabled = screenshot_enabled;
-        settings.image_recognition = new_image_recognition;
+        settings.image_recognition_model_dir = path_from_string(image_recognition_model_dir);
         settings.text_translation = new_text_translation;
         settings.clone()
     };
@@ -344,7 +332,7 @@ fn apply_settings_snapshot(
         &updated_settings.tencent_cloud,
     );
     ocr_service.apply_settings(
-        &updated_settings.image_recognition,
+        updated_settings.image_recognition_model_path(),
         updated_settings.ai_backend,
         &updated_settings.tencent_cloud,
     );

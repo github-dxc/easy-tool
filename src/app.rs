@@ -90,7 +90,7 @@ pub fn run() {
         ));
         let settings_snapshot = settings.lock().unwrap().clone();
         let ocr_service = Arc::new(OcrService::new(
-            &settings_snapshot.image_recognition,
+            settings_snapshot.image_recognition_model_path(),
             settings_snapshot.ai_backend,
             &settings_snapshot.tencent_cloud,
         ));
@@ -136,7 +136,7 @@ pub fn run() {
         &settings_snapshot.tencent_cloud,
     ));
     let ocr_service = Arc::new(OcrService::new(
-        &settings_snapshot.image_recognition,
+        settings_snapshot.image_recognition_model_path(),
         settings_snapshot.ai_backend,
         &settings_snapshot.tencent_cloud,
     ));

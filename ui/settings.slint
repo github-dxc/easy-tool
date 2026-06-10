@@ -1,4 +1,4 @@
-import { Button, LineEdit, Switch } from "std-widgets.slint";
+﻿import { Button, LineEdit, Switch } from "std-widgets.slint";
 import "../assets/font/AlibabaPuHuiTi-3-55-Regular.ttf";
 
 export component SettingsWindow inherits Window {
@@ -10,7 +10,6 @@ export component SettingsWindow inherits Window {
     in-out property <bool> copy_timestamp_enabled: true;
     in-out property <bool> clipboard_history_enabled: true;
     in-out property <bool> screenshot_enabled: true;
-    in-out property <bool> image_recognition_enabled: true;
     in-out property <bool> text_translation_enabled: false;
     in-out property <bool> tencent_backend_enabled: false;
     in-out property <string> tencent_secret_id: "";
@@ -28,7 +27,6 @@ export component SettingsWindow inherits Window {
         copy_timestamp_enabled: bool,
         clipboard_history_enabled: bool,
         screenshot_enabled: bool,
-        image_recognition_enabled: bool,
         text_translation_enabled: bool,
         tencent_backend_enabled: bool,
         tencent_secret_id: string,
@@ -87,7 +85,7 @@ export component SettingsWindow inherits Window {
                                     checked <=> root.copy_timestamp_enabled;
                                     text: self.checked ? "已开启" : "已关闭";
                                     toggled => {
-                                        root.apply_settings(root.copy_timestamp_enabled, root.clipboard_history_enabled, root.screenshot_enabled, root.image_recognition_enabled, root.text_translation_enabled, root.tencent_backend_enabled, root.tencent_secret_id, root.tencent_secret_key, root.image_recognition_model_dir, root.text_translation_debounce_seconds);
+                                        root.apply_settings(root.copy_timestamp_enabled, root.clipboard_history_enabled, root.screenshot_enabled, root.text_translation_enabled, root.tencent_backend_enabled, root.tencent_secret_id, root.tencent_secret_key, root.image_recognition_model_dir, root.text_translation_debounce_seconds);
                                     }
                                 }
                             }
@@ -107,7 +105,7 @@ export component SettingsWindow inherits Window {
                                     checked <=> root.clipboard_history_enabled;
                                     text: self.checked ? "已开启" : "已关闭";
                                     toggled => {
-                                        root.apply_settings(root.copy_timestamp_enabled, root.clipboard_history_enabled, root.screenshot_enabled, root.image_recognition_enabled, root.text_translation_enabled, root.tencent_backend_enabled, root.tencent_secret_id, root.tencent_secret_key, root.image_recognition_model_dir, root.text_translation_debounce_seconds);
+                                        root.apply_settings(root.copy_timestamp_enabled, root.clipboard_history_enabled, root.screenshot_enabled, root.text_translation_enabled, root.tencent_backend_enabled, root.tencent_secret_id, root.tencent_secret_key, root.image_recognition_model_dir, root.text_translation_debounce_seconds);
                                     }
                                 }
                             }
@@ -127,27 +125,7 @@ export component SettingsWindow inherits Window {
                                     checked <=> root.screenshot_enabled;
                                     text: self.checked ? "已开启" : "已关闭";
                                     toggled => {
-                                        root.apply_settings(root.copy_timestamp_enabled, root.clipboard_history_enabled, root.screenshot_enabled, root.image_recognition_enabled, root.text_translation_enabled, root.tencent_backend_enabled, root.tencent_secret_id, root.tencent_secret_key, root.image_recognition_model_dir, root.text_translation_debounce_seconds);
-                                    }
-                                }
-                            }
-
-                            HorizontalLayout {
-                                spacing: 16px;
-
-                                Text {
-                                    text: "图像识别";
-                                    color: #223041;
-                                    font-size: 14px;
-                                    vertical-alignment: center;
-                                    horizontal-stretch: 1;
-                                }
-
-                                Switch {
-                                    checked <=> root.image_recognition_enabled;
-                                    text: self.checked ? "已开启" : "已关闭";
-                                    toggled => {
-                                        root.apply_settings(root.copy_timestamp_enabled, root.clipboard_history_enabled, root.screenshot_enabled, root.image_recognition_enabled, root.text_translation_enabled, root.tencent_backend_enabled, root.tencent_secret_id, root.tencent_secret_key, root.image_recognition_model_dir, root.text_translation_debounce_seconds);
+                                        root.apply_settings(root.copy_timestamp_enabled, root.clipboard_history_enabled, root.screenshot_enabled, root.text_translation_enabled, root.tencent_backend_enabled, root.tencent_secret_id, root.tencent_secret_key, root.image_recognition_model_dir, root.text_translation_debounce_seconds);
                                     }
                                 }
                             }
@@ -167,7 +145,7 @@ export component SettingsWindow inherits Window {
                                     checked <=> root.text_translation_enabled;
                                     text: self.checked ? "已开启" : "已关闭";
                                     toggled => {
-                                        root.apply_settings(root.copy_timestamp_enabled, root.clipboard_history_enabled, root.screenshot_enabled, root.image_recognition_enabled, root.text_translation_enabled, root.tencent_backend_enabled, root.tencent_secret_id, root.tencent_secret_key, root.image_recognition_model_dir, root.text_translation_debounce_seconds);
+                                        root.apply_settings(root.copy_timestamp_enabled, root.clipboard_history_enabled, root.screenshot_enabled, root.text_translation_enabled, root.tencent_backend_enabled, root.tencent_secret_id, root.tencent_secret_key, root.image_recognition_model_dir, root.text_translation_debounce_seconds);
                                     }
                                 }
                             }
@@ -187,7 +165,7 @@ export component SettingsWindow inherits Window {
                                     checked <=> root.tencent_backend_enabled;
                                     text: self.checked ? "本地模型" : "腾讯API";
                                     toggled => {
-                                        root.apply_settings(root.copy_timestamp_enabled, root.clipboard_history_enabled, root.screenshot_enabled, root.image_recognition_enabled, root.text_translation_enabled, root.tencent_backend_enabled, root.tencent_secret_id, root.tencent_secret_key, root.image_recognition_model_dir, root.text_translation_debounce_seconds);
+                                        root.apply_settings(root.copy_timestamp_enabled, root.clipboard_history_enabled, root.screenshot_enabled, root.text_translation_enabled, root.tencent_backend_enabled, root.tencent_secret_id, root.tencent_secret_key, root.image_recognition_model_dir, root.text_translation_debounce_seconds);
                                     }
                                 }
                             }
@@ -208,7 +186,7 @@ export component SettingsWindow inherits Window {
                                     placeholder-text: "默认 1";
                                     edited(new_text) => {
                                         if (new_text != "" && new_text.is-float()) {
-                                            root.apply_settings(root.copy_timestamp_enabled, root.clipboard_history_enabled, root.screenshot_enabled, root.image_recognition_enabled, root.text_translation_enabled, root.tencent_backend_enabled, root.tencent_secret_id, root.tencent_secret_key, root.image_recognition_model_dir, root.text_translation_debounce_seconds);
+                                            root.apply_settings(root.copy_timestamp_enabled, root.clipboard_history_enabled, root.screenshot_enabled, root.text_translation_enabled, root.tencent_backend_enabled, root.tencent_secret_id, root.tencent_secret_key, root.image_recognition_model_dir, root.text_translation_debounce_seconds);
                                             root.last_valid_text_translation_debounce_seconds = new_text;
                                         } else {
                                             root.text_translation_debounce_seconds = root.last_valid_text_translation_debounce_seconds;
@@ -250,7 +228,7 @@ export component SettingsWindow inherits Window {
                                     text <=> root.tencent_secret_id;
                                     placeholder-text: "SecretId";
                                     edited(_) => {
-                                        root.apply_settings(root.copy_timestamp_enabled, root.clipboard_history_enabled, root.screenshot_enabled, root.image_recognition_enabled, root.text_translation_enabled, root.tencent_backend_enabled, root.tencent_secret_id, root.tencent_secret_key, root.image_recognition_model_dir, root.text_translation_debounce_seconds);
+                                        root.apply_settings(root.copy_timestamp_enabled, root.clipboard_history_enabled, root.screenshot_enabled, root.text_translation_enabled, root.tencent_backend_enabled, root.tencent_secret_id, root.tencent_secret_key, root.image_recognition_model_dir, root.text_translation_debounce_seconds);
                                     }
                                 }
 
@@ -258,7 +236,7 @@ export component SettingsWindow inherits Window {
                                     text <=> root.tencent_secret_key;
                                     placeholder-text: "SecretKey";
                                     edited(_) => {
-                                        root.apply_settings(root.copy_timestamp_enabled, root.clipboard_history_enabled, root.screenshot_enabled, root.image_recognition_enabled, root.text_translation_enabled, root.tencent_backend_enabled, root.tencent_secret_id, root.tencent_secret_key, root.image_recognition_model_dir, root.text_translation_debounce_seconds);
+                                        root.apply_settings(root.copy_timestamp_enabled, root.clipboard_history_enabled, root.screenshot_enabled, root.text_translation_enabled, root.tencent_backend_enabled, root.tencent_secret_id, root.tencent_secret_key, root.image_recognition_model_dir, root.text_translation_debounce_seconds);
                                     }
                                 }
                             }

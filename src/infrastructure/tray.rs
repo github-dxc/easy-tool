@@ -192,7 +192,7 @@ pub fn start_tray_event_pump(
                         &settings.tencent_cloud,
                     );
                     ocr_service.apply_settings(
-                        &settings.image_recognition,
+                        settings.image_recognition_model_path(),
                         settings.ai_backend,
                         &settings.tencent_cloud,
                     );
