@@ -61,6 +61,65 @@ pub fn init_settings_window(
     }
 
     {
+        let weak_window = window.as_weak();
+        let settings = Arc::clone(&settings);
+        let settings_store = settings_store.clone();
+        let translation_service = Arc::clone(&translation_service);
+        let ocr_service = Arc::clone(&ocr_service);
+        let tray_menu_handles = tray_menu_handles.clone();
+        let on_settings_applied = Rc::clone(&on_settings_applied);
+        window.on_browse_text_translation_zh_to_en_model_dir(move || {
+            let Some(path) = open_folder_dialog("选择中译英模型目录") else {
+                return;
+            };
+
+            let selected = path.to_string_lossy().to_string();
+            if let Some(window) = weak_window.upgrade() {
+                window.set_text_translation_zh_to_en_model_dir(selected.into());
+                apply_from_window(
+                    &window,
+                    &settings,
+                    &settings_store,
+                    &translation_service,
+                    &ocr_service,
+                    &tray_menu_handles,
+                    &on_settings_applied,
+                );
+            }
+        });
+    }
+
+    {
+        let weak_window = window.as_weak();
+        let settings = Arc::clone(&settings);
+        let settings_store = settings_store.clone();
+        let translation_service = Arc::clone(&translation_service);
+        let ocr_service = Arc::clone(&ocr_service);
+        let tray_menu_handles = tray_menu_handles.clone();
+        let on_settings_applied = Rc::clone(&on_settings_applied);
+        window.on_browse_text_translation_en_to_zh_model_dir(move || {
+            let Some(path) = open_folder_dialog("选择英译中模型目录") else {
+                return;
+            };
+
+            let selected = path.to_string_lossy().to_string();
+            if let Some(window) = weak_window.upgrade() {
+                window.set_text_translation_en_to_zh_model_dir(selected.into());
+                apply_from_window(
+                    &window,
+                    &settings,
+                    &settings_store,
+                    &translation_service,
+                    &ocr_service,
+                    &tray_menu_handles,
+                    &on_settings_applied,
+                );
+            }
+        });
+    }
+
+    {
+        let weak_window = window.as_weak();
         let settings = Arc::clone(&settings);
         let translation_service = Arc::clone(&translation_service);
         let ocr_service = Arc::clone(&ocr_service);
@@ -78,6 +137,9 @@ pub fn init_settings_window(
                   tencent_secret_key,
                   image_recognition_model_dir,
                   text_translation_debounce_seconds| {
+                let Some(window) = weak_window.upgrade() else {
+                    return;
+                };
                 apply_settings_snapshot(
                     &settings,
                     &settings_store,
@@ -94,6 +156,8 @@ pub fn init_settings_window(
                     &tencent_secret_id,
                     &tencent_secret_key,
                     &image_recognition_model_dir,
+                    &window.get_text_translation_zh_to_en_model_dir(),
+                    &window.get_text_translation_en_to_zh_model_dir(),
                     &text_translation_debounce_seconds,
                 );
             },
@@ -125,6 +189,24 @@ pub fn show_settings_window(window: &SettingsWindow, settings: &AppSettings) {
         settings
             .image_recognition
             .model_dir
+            .as_ref()
+            .map(|path| path.to_string_lossy().to_string())
+            .unwrap_or_default()
+            .into(),
+    );
+    window.set_text_translation_zh_to_en_model_dir(
+        settings
+            .text_translation
+            .zh_to_en_model_dir
+            .as_ref()
+            .map(|path| path.to_string_lossy().to_string())
+            .unwrap_or_default()
+            .into(),
+    );
+    window.set_text_translation_en_to_zh_model_dir(
+        settings
+            .text_translation
+            .en_to_zh_model_dir
             .as_ref()
             .map(|path| path.to_string_lossy().to_string())
             .unwrap_or_default()
@@ -192,6 +274,8 @@ fn apply_from_window(
         &window.get_tencent_secret_id(),
         &window.get_tencent_secret_key(),
         &window.get_image_recognition_model_dir(),
+        &window.get_text_translation_zh_to_en_model_dir(),
+        &window.get_text_translation_en_to_zh_model_dir(),
         &window.get_text_translation_debounce_seconds(),
     );
 }
@@ -212,6 +296,8 @@ fn apply_settings_snapshot(
     tencent_secret_id: &str,
     tencent_secret_key: &str,
     image_recognition_model_dir: &str,
+    text_translation_zh_to_en_model_dir: &str,
+    text_translation_en_to_zh_model_dir: &str,
     text_translation_debounce_seconds: &str,
 ) {
     let ai_backend = if tencent_backend_enabled {
@@ -225,6 +311,8 @@ fn apply_settings_snapshot(
     };
     let new_text_translation = TextTranslationSettings {
         enabled: text_translation_enabled,
+        zh_to_en_model_dir: path_from_string(text_translation_zh_to_en_model_dir),
+        en_to_zh_model_dir: path_from_string(text_translation_en_to_zh_model_dir),
         debounce_seconds: debounce_seconds_from_string(text_translation_debounce_seconds),
     };
     let new_image_recognition = ImageRecognitionSettings {

@@ -17,10 +17,7 @@ use crate::infrastructure::idle_model::IdleModel;
 use crate::infrastructure::tencent_cloud::client::{
     TencentTranslationDirection, translate_text as translate_text_with_tencent,
 };
-use crate::settings::{
-    AiBackend, TencentCloudSettings, TextTranslationSettings,
-    default_en_to_zh_translation_model_path, default_zh_to_en_translation_model_path,
-};
+use crate::settings::{AiBackend, TencentCloudSettings, TextTranslationSettings};
 
 const DECODER_START_TOKEN_ID: i64 = 65000;
 const EOS_TOKEN_ID: i64 = 0;
@@ -44,6 +41,8 @@ struct TranslationState {
     enabled: bool,
     ai_backend: AiBackend,
     tencent_cloud: TencentCloudSettings,
+    zh_to_en_model_path: PathBuf,
+    en_to_zh_model_path: PathBuf,
 }
 
 struct TranslationModel {
@@ -69,6 +68,8 @@ impl TranslationService {
                 enabled: false,
                 ai_backend,
                 tencent_cloud: tencent_cloud.clone(),
+                zh_to_en_model_path: settings.zh_to_en_model_path(),
+                en_to_zh_model_path: settings.en_to_zh_model_path(),
             }),
             zh_to_en_model: Mutex::new(IdleModel::empty()),
             en_to_zh_model: Mutex::new(IdleModel::empty()),
@@ -87,6 +88,12 @@ impl TranslationService {
         let mut state = self.state.lock().unwrap();
         state.ai_backend = ai_backend;
         state.tencent_cloud = tencent_cloud.clone();
+        let zh_to_en_model_path = settings.zh_to_en_model_path();
+        let en_to_zh_model_path = settings.en_to_zh_model_path();
+        let unload_zh_to_en = state.zh_to_en_model_path != zh_to_en_model_path;
+        let unload_en_to_zh = state.en_to_zh_model_path != en_to_zh_model_path;
+        state.zh_to_en_model_path = zh_to_en_model_path;
+        state.en_to_zh_model_path = en_to_zh_model_path;
 
         if !settings.enabled {
             state.enabled = false;
@@ -96,6 +103,14 @@ impl TranslationService {
         }
 
         state.enabled = true;
+        drop(state);
+
+        if unload_zh_to_en && let Ok(mut model) = self.zh_to_en_model.try_lock() {
+            model.unload_now();
+        }
+        if unload_en_to_zh && let Ok(mut model) = self.en_to_zh_model.try_lock() {
+            model.unload_now();
+        }
     }
 
     /// Runs translation for copied text when the feature is enabled.
@@ -123,40 +138,44 @@ impl TranslationService {
             return Ok(String::new());
         };
 
-        let tencent_cloud = {
+        let request = {
             let state = self.state.lock().unwrap();
             if !state.enabled {
                 return Err("text translation is disabled".into());
             }
 
             match state.ai_backend {
-                AiBackend::Tencent => Some(state.tencent_cloud.clone()),
-                AiBackend::Local => None,
+                AiBackend::Tencent => TranslationRequest::Tencent(state.tencent_cloud.clone()),
+                AiBackend::Local => {
+                    TranslationRequest::Local(local_model_path_for_direction(&state, direction))
+                }
             }
         };
 
-        if let Some(tencent_cloud) = tencent_cloud {
-            if should_cancel() {
-                return Ok(String::new());
+        match request {
+            TranslationRequest::Tencent(tencent_cloud) => {
+                if should_cancel() {
+                    return Ok(String::new());
+                }
+                let translated = translate_text_with_tencent(
+                    &tencent_cloud,
+                    backend_direction_for(direction),
+                    text,
+                )?;
+                if !translated.is_empty() {
+                    on_partial(&translated);
+                }
+                Ok(translated)
             }
-            let translated = translate_text_with_tencent(
-                &tencent_cloud,
-                backend_direction_for(direction),
-                text,
-            )?;
-            if !translated.is_empty() {
-                on_partial(&translated);
+            TranslationRequest::Local(model_path) => {
+                let mut model = self.local_model_for_direction(direction).lock().unwrap();
+                let result = model
+                    .get_or_try_load(|| TranslationModel::load(&model_path))?
+                    .translate_streaming(text, on_partial, should_cancel);
+                model.refresh_idle_deadline(Instant::now());
+                result
             }
-            return Ok(translated);
         }
-
-        let model_path = local_model_path_for_direction(direction);
-        let mut model = self.local_model_for_direction(direction).lock().unwrap();
-        let result = model
-            .get_or_try_load(|| TranslationModel::load(&model_path))?
-            .translate_streaming(text, on_partial, should_cancel);
-        model.refresh_idle_deadline(Instant::now());
-        result
     }
 
     pub fn unload_if_idle(&self) {
@@ -193,10 +212,18 @@ impl TranslationService {
     }
 }
 
-fn local_model_path_for_direction(direction: DetectedTranslationDirection) -> PathBuf {
+enum TranslationRequest {
+    Tencent(TencentCloudSettings),
+    Local(PathBuf),
+}
+
+fn local_model_path_for_direction(
+    state: &TranslationState,
+    direction: DetectedTranslationDirection,
+) -> PathBuf {
     match direction {
-        DetectedTranslationDirection::ZhToEn => default_zh_to_en_translation_model_path(),
-        DetectedTranslationDirection::EnToZh => default_en_to_zh_translation_model_path(),
+        DetectedTranslationDirection::ZhToEn => state.zh_to_en_model_path.clone(),
+        DetectedTranslationDirection::EnToZh => state.en_to_zh_model_path.clone(),
     }
 }
 
@@ -634,7 +661,7 @@ fn banned_repeated_ngram_tokens(generated_ids: &[i64], ngram_size: usize) -> Vec
 #[cfg(test)]
 mod tests {
     use super::{
-        MAX_DECODER_SEQUENCE_LEN, MIN_DECODER_SEQUENCE_LEN, TranslationService,
+        MAX_DECODER_SEQUENCE_LEN, MIN_DECODER_SEQUENCE_LEN, TranslationService, TranslationState,
         backend_direction_for, banned_repeated_ngram_tokens, decoder_sequence_len_for_source,
         join_translated_chunks, local_model_path_for_direction, repetition_adjusted_score,
         split_text_segments,
@@ -645,6 +672,7 @@ mod tests {
         AiBackend, TencentCloudSettings, TextTranslationSettings,
         default_en_to_zh_translation_model_path, default_zh_to_en_translation_model_path,
     };
+    use std::path::PathBuf;
 
     #[test]
     fn decoder_len_grows_with_source_but_stays_bounded() {
@@ -665,13 +693,41 @@ mod tests {
 
     #[test]
     fn maps_detected_direction_to_local_model_path() {
+        let state = TranslationState {
+            enabled: true,
+            ai_backend: AiBackend::Local,
+            tencent_cloud: TencentCloudSettings::default(),
+            zh_to_en_model_path: default_zh_to_en_translation_model_path(),
+            en_to_zh_model_path: default_en_to_zh_translation_model_path(),
+        };
+
         assert_eq!(
-            local_model_path_for_direction(DetectedTranslationDirection::ZhToEn),
+            local_model_path_for_direction(&state, DetectedTranslationDirection::ZhToEn),
             default_zh_to_en_translation_model_path()
         );
         assert_eq!(
-            local_model_path_for_direction(DetectedTranslationDirection::EnToZh),
+            local_model_path_for_direction(&state, DetectedTranslationDirection::EnToZh),
             default_en_to_zh_translation_model_path()
+        );
+    }
+
+    #[test]
+    fn maps_detected_direction_to_configured_local_model_path() {
+        let state = TranslationState {
+            enabled: true,
+            ai_backend: AiBackend::Local,
+            tencent_cloud: TencentCloudSettings::default(),
+            zh_to_en_model_path: PathBuf::from("custom-zh-en"),
+            en_to_zh_model_path: PathBuf::from("custom-en-zh"),
+        };
+
+        assert_eq!(
+            local_model_path_for_direction(&state, DetectedTranslationDirection::ZhToEn),
+            PathBuf::from("custom-zh-en")
+        );
+        assert_eq!(
+            local_model_path_for_direction(&state, DetectedTranslationDirection::EnToZh),
+            PathBuf::from("custom-en-zh")
         );
     }
 
@@ -692,6 +748,8 @@ mod tests {
         let service = TranslationService::new(
             &TextTranslationSettings {
                 enabled: true,
+                zh_to_en_model_dir: None,
+                en_to_zh_model_dir: None,
                 debounce_seconds: 1,
             },
             AiBackend::Local,

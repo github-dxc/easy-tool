@@ -72,6 +72,10 @@ pub struct TencentCloudSettings {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TextTranslationSettings {
     pub enabled: bool,
+    #[serde(default)]
+    pub zh_to_en_model_dir: Option<PathBuf>,
+    #[serde(default)]
+    pub en_to_zh_model_dir: Option<PathBuf>,
     #[serde(default = "default_text_translation_debounce_seconds")]
     pub debounce_seconds: u64,
 }
@@ -122,6 +126,8 @@ impl Default for TextTranslationSettings {
     fn default() -> Self {
         Self {
             enabled: false,
+            zh_to_en_model_dir: None,
+            en_to_zh_model_dir: None,
             debounce_seconds: default_text_translation_debounce_seconds(),
         }
     }
@@ -136,6 +142,20 @@ impl ImageRecognitionSettings {
         self.model_dir
             .clone()
             .unwrap_or_else(default_image_recognition_model_path)
+    }
+}
+
+impl TextTranslationSettings {
+    pub fn zh_to_en_model_path(&self) -> PathBuf {
+        self.zh_to_en_model_dir
+            .clone()
+            .unwrap_or_else(default_zh_to_en_translation_model_path)
+    }
+
+    pub fn en_to_zh_model_path(&self) -> PathBuf {
+        self.en_to_zh_model_dir
+            .clone()
+            .unwrap_or_else(default_en_to_zh_translation_model_path)
     }
 }
 
@@ -246,5 +266,13 @@ en_to_zh_model_dir = "resource/Xenova/opus-mt-en-zh"
 
         assert!(settings.text_translation.enabled);
         assert_eq!(settings.text_translation.debounce_seconds, 5);
+        assert_eq!(
+            settings.text_translation.zh_to_en_model_dir,
+            Some(PathBuf::from("resource/Xenova/opus-mt-zh-en"))
+        );
+        assert_eq!(
+            settings.text_translation.en_to_zh_model_dir,
+            Some(PathBuf::from("resource/Xenova/opus-mt-en-zh"))
+        );
     }
 }

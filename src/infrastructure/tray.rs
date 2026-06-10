@@ -4,20 +4,18 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use log::info;
-use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu};
+use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem};
 use tray_icon::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 
 use crate::assets::load_tray_icon;
 use crate::features::file_preview::ocr::OcrService;
 use crate::features::text_translation::translator::TranslationService;
-use crate::settings::{AiBackend, AppSettings, SettingsStore};
+use crate::settings::{AppSettings, SettingsStore};
 
 const COPY_TIMESTAMP_MENU_ID: &str = "copy_timestamp_enabled";
 const CLIPBOARD_HISTORY_MENU_ID: &str = "clipboard_history_enabled";
 const SCREENSHOT_MENU_ID: &str = "screenshot_enabled";
 const TEXT_TRANSLATION_MENU_ID: &str = "text_translation_enabled";
-const AI_BACKEND_LOCAL_MENU_ID: &str = "ai_backend_local";
-const AI_BACKEND_TENCENT_MENU_ID: &str = "ai_backend_tencent";
 const QUIT_MENU_ID: &str = "quit";
 
 /// Keeps tray UI handles alive and exposes menu items needed by the event pump.
@@ -28,8 +26,6 @@ pub struct TrayState {
     clipboard_history_item: CheckMenuItem,
     screenshot_item: CheckMenuItem,
     text_translation_item: CheckMenuItem,
-    ai_backend_local_item: CheckMenuItem,
-    ai_backend_tencent_item: CheckMenuItem,
 }
 
 #[derive(Clone)]
@@ -38,8 +34,6 @@ pub struct TrayMenuHandles {
     clipboard_history_item: CheckMenuItem,
     screenshot_item: CheckMenuItem,
     text_translation_item: CheckMenuItem,
-    ai_backend_local_item: CheckMenuItem,
-    ai_backend_tencent_item: CheckMenuItem,
 }
 
 impl TrayState {
@@ -49,8 +43,6 @@ impl TrayState {
             clipboard_history_item: self.clipboard_history_item.clone(),
             screenshot_item: self.screenshot_item.clone(),
             text_translation_item: self.text_translation_item.clone(),
-            ai_backend_local_item: self.ai_backend_local_item.clone(),
-            ai_backend_tencent_item: self.ai_backend_tencent_item.clone(),
         }
     }
 }
@@ -65,10 +57,6 @@ impl TrayMenuHandles {
             .set_checked(settings.screenshot.enabled);
         self.text_translation_item
             .set_checked(settings.text_translation.enabled);
-        self.ai_backend_local_item
-            .set_checked(settings.ai_backend == AiBackend::Local);
-        self.ai_backend_tencent_item
-            .set_checked(settings.ai_backend == AiBackend::Tencent);
     }
 }
 
@@ -112,24 +100,6 @@ pub fn init_tray_icon(settings: &AppSettings) -> TrayState {
     );
     tray_menu.append(&text_translation_item).unwrap();
 
-    let ai_backend_menu = Submenu::new("AI 后端", true);
-    let ai_backend_local_item = CheckMenuItem::with_id(
-        AI_BACKEND_LOCAL_MENU_ID,
-        "本地模型",
-        true,
-        settings.ai_backend == AiBackend::Local,
-        None,
-    );
-    let ai_backend_tencent_item = CheckMenuItem::with_id(
-        AI_BACKEND_TENCENT_MENU_ID,
-        "腾讯 API",
-        true,
-        settings.ai_backend == AiBackend::Tencent,
-        None,
-    );
-    ai_backend_menu.append(&ai_backend_local_item).unwrap();
-    ai_backend_menu.append(&ai_backend_tencent_item).unwrap();
-    tray_menu.append(&ai_backend_menu).unwrap();
     tray_menu.append(&PredefinedMenuItem::separator()).unwrap();
 
     let quit_item = MenuItem::with_id(QUIT_MENU_ID, "退出", true, None);
@@ -151,8 +121,6 @@ pub fn init_tray_icon(settings: &AppSettings) -> TrayState {
         clipboard_history_item,
         screenshot_item,
         text_translation_item,
-        ai_backend_local_item,
-        ai_backend_tencent_item,
     }
 }
 
@@ -206,14 +174,6 @@ pub fn start_tray_event_pump(
                 } else if event.id.as_ref() == TEXT_TRANSLATION_MENU_ID {
                     update_settings_snapshot(&settings, |settings| {
                         settings.text_translation.enabled = text_translation_item.is_checked();
-                    })
-                } else if event.id.as_ref() == AI_BACKEND_LOCAL_MENU_ID {
-                    update_settings_snapshot(&settings, |settings| {
-                        settings.ai_backend = AiBackend::Local;
-                    })
-                } else if event.id.as_ref() == AI_BACKEND_TENCENT_MENU_ID {
-                    update_settings_snapshot(&settings, |settings| {
-                        settings.ai_backend = AiBackend::Tencent;
                     })
                 } else if event.id.as_ref() == QUIT_MENU_ID {
                     info!("quit application");
