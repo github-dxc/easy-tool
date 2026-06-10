@@ -100,4 +100,25 @@ mod tests {
             "44136fa355b3678a1146ad16f7e8649e94fb4f7c4dbe2dc8aebe1c9e820d0d5"
         );
     }
+
+    #[test]
+    fn sign_v3_matches_tencent_official_style_fixture() {
+        let authorization = sign_v3(TencentSignatureInput {
+            secret_id: "AKIDEXAMPLE",
+            secret_key: "SECRETKEYEXAMPLE",
+            service: "cvm",
+            host: "cvm.tencentcloudapi.com",
+            action: "DescribeInstances",
+            version: "2017-03-12",
+            region: "ap-guangzhou",
+            timestamp: 1551113065,
+            date: "2019-02-25",
+            payload: r#"{"Limit": 1, "Filters": [{"Values": ["unnamed"], "Name": "instance-name"}]}"#,
+        });
+
+        assert_eq!(
+            authorization,
+            "TC3-HMAC-SHA256 Credential=AKIDEXAMPLE/2019-02-25/cvm/tc3_request, SignedHeaders=content-type;host, Signature=afb799e18731e47055b1c0aedee9b5d62d09d9712cc3b578a6a757645054013f"
+        );
+    }
 }
