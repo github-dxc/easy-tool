@@ -3,6 +3,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::time::Instant;
 
 use image::imageops::FilterType;
 use ort::memory::Allocator;
@@ -11,6 +12,7 @@ use ort::value::{Shape, Tensor};
 use serde_json::Value;
 use tokenizers::Tokenizer;
 
+use crate::infrastructure::idle_model::IdleModel;
 use crate::settings::ImageRecognitionSettings;
 
 const BOS_TOKEN: &str = "<|begin_of_sentence|>";
@@ -44,7 +46,7 @@ pub struct OcrService {
 struct OcrState {
     enabled: bool,
     model_path: Option<PathBuf>,
-    model: Option<OcrModel>,
+    model: IdleModel<OcrModel>,
 }
 
 struct OcrModel {
@@ -78,7 +80,7 @@ impl OcrService {
             state: Mutex::new(OcrState {
                 enabled: false,
                 model_path: None,
-                model: None,
+                model: IdleModel::empty(),
             }),
         };
         service.apply_settings(settings);
@@ -90,12 +92,12 @@ impl OcrService {
         let model_path = settings.model_dir.clone();
         if state.model_path != model_path {
             state.model_path = model_path;
-            state.model = None;
+            state.model.unload_now();
         }
 
         if !settings.enabled {
             state.enabled = false;
-            state.model = None;
+            state.model.unload_now();
             return;
         }
 
@@ -116,22 +118,29 @@ impl OcrService {
             return Err("图像识别已关闭".into());
         }
 
-        if state.model.is_none() {
-            let model_path = state
-                .model_path
-                .clone()
-                .ok_or_else(|| "请先在设置页配置 OCR 模型目录".to_string())?;
-            state.model = Some(OcrModel::load(&model_path)?);
-        }
+        let model_path = state
+            .model_path
+            .clone()
+            .ok_or_else(|| "请先在设置页配置 OCR 模型目录".to_string())?;
+        let result = {
+            let model = state
+                .model
+                .get_or_try_load(|| OcrModel::load(&model_path))?;
+            model.recognize_streaming(image_path, on_partial)
+        };
+        state.model.refresh_idle_deadline(Instant::now());
+        result
+    }
 
-        state
-            .model
-            .as_mut()
-            .ok_or_else(|| "OCR 模型未加载".to_string())?
-            .recognize_streaming(image_path, on_partial)
+    pub fn unload_if_idle(&self) {
+        let Ok(mut state) = self.state.try_lock() else {
+            return;
+        };
+        if state.model.unload_if_idle(Instant::now()) {
+            log::info!("unloaded idle OCR model");
+        }
     }
 }
-
 impl OcrModel {
     fn load(path: &Path) -> Result<Self, String> {
         let model_dir = resolve_model_dir(path)?;

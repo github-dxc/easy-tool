@@ -51,6 +51,14 @@ pub fn run() {
         let ocr_service = Arc::new(OcrService::new(&settings.lock().unwrap().image_recognition));
         let file_preview_window = init_file_preview_window(true, Arc::clone(&ocr_service));
         show_file_preview_window(&file_preview_window, path.into());
+        let model_cleanup_timer = slint::Timer::default();
+        model_cleanup_timer.start(slint::TimerMode::Repeated, Duration::from_secs(5), {
+            let ocr_service = Arc::clone(&ocr_service);
+            move || {
+                ocr_service.unload_if_idle();
+            }
+        });
+        let _model_cleanup_timer = model_cleanup_timer;
         slint::run_event_loop_until_quit().unwrap();
         return;
     }
@@ -251,6 +259,16 @@ pub fn run() {
     })
     .expect("failed to start global input listener");
 
+    let model_cleanup_timer = slint::Timer::default();
+    model_cleanup_timer.start(slint::TimerMode::Repeated, Duration::from_secs(5), {
+        let translation_service = Arc::clone(&translation_service);
+        let ocr_service = Arc::clone(&ocr_service);
+        move || {
+            translation_service.unload_if_idle();
+            ocr_service.unload_if_idle();
+        }
+    });
+
     let _tray_timer = start_tray_event_pump(
         &tray_state,
         Arc::clone(&settings),
@@ -265,6 +283,7 @@ pub fn run() {
             }
         },
     );
+    let _model_cleanup_timer = model_cleanup_timer;
     slint::run_event_loop_until_quit().unwrap();
 }
 

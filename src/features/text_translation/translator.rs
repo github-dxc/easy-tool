@@ -3,12 +3,14 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::time::Instant;
 
 use ort::session::{Session, builder::GraphOptimizationLevel};
 use ort::value::Tensor;
 use serde_json::Value;
 use tokenizers::Tokenizer;
 
+use crate::infrastructure::idle_model::IdleModel;
 use crate::settings::TextTranslationSettings;
 
 const DECODER_START_TOKEN_ID: i64 = 65000;
@@ -22,7 +24,7 @@ const MAX_DECODER_SEQUENCE_LEN: usize = 512;
 const NO_REPEAT_NGRAM_SIZE: usize = 3;
 const REPETITION_PENALTY: f32 = 1.2;
 
-/// Owns the loaded translation model and unloads it when the tray toggle is off.
+/// Owns lightweight translation state and loads the model on first use.
 pub struct TranslationService {
     state: Mutex<TranslationState>,
 }
@@ -30,7 +32,7 @@ pub struct TranslationService {
 struct TranslationState {
     enabled: bool,
     model_path: PathBuf,
-    model: Option<TranslationModel>,
+    model: IdleModel<TranslationModel>,
 }
 
 struct TranslationModel {
@@ -45,44 +47,35 @@ struct SourceChunk {
 }
 
 impl TranslationService {
-    /// Creates the service and eagerly loads the model when the setting is enabled.
+    /// Creates the service without loading the model.
     pub fn new(settings: &TextTranslationSettings) -> Self {
         let service = Self {
             state: Mutex::new(TranslationState {
                 enabled: false,
                 model_path: settings.model_path(),
-                model: None,
+                model: IdleModel::empty(),
             }),
         };
         service.apply_settings(settings);
         service
     }
 
-    /// Applies tray/config changes, loading or unloading the ONNX runtime plan.
+    /// Applies tray/config changes without loading the ONNX runtime plan.
     pub fn apply_settings(&self, settings: &TextTranslationSettings) {
         let mut state = self.state.lock().unwrap();
         let model_path = settings.model_path();
         if state.model_path != model_path {
             state.model_path = model_path;
-            state.model = None;
+            state.model.unload_now();
         }
 
         if !settings.enabled {
             state.enabled = false;
-            state.model = None;
+            state.model.unload_now();
             return;
         }
 
         state.enabled = true;
-        if state.model.is_none() {
-            match TranslationModel::load(&state.model_path) {
-                Ok(model) => state.model = Some(model),
-                Err(err) => {
-                    log::error!("load translation model failed: {err}");
-                    state.model = None;
-                }
-            }
-        }
     }
 
     /// Runs translation for copied text when the feature is enabled.
@@ -111,15 +104,24 @@ impl TranslationService {
             return Err("text translation is disabled".into());
         }
 
-        if state.model.is_none() {
-            state.model = Some(TranslationModel::load(&state.model_path)?);
-        }
+        let model_path = state.model_path.clone();
+        let result = {
+            let model = state
+                .model
+                .get_or_try_load(|| TranslationModel::load(&model_path))?;
+            model.translate_streaming(text, on_partial, should_cancel)
+        };
+        state.model.refresh_idle_deadline(Instant::now());
+        result
+    }
 
-        state
-            .model
-            .as_mut()
-            .ok_or_else(|| "translation model is not loaded".to_string())?
-            .translate_streaming(text, on_partial, should_cancel)
+    pub fn unload_if_idle(&self) {
+        let Ok(mut state) = self.state.try_lock() else {
+            return;
+        };
+        if state.model.unload_if_idle(Instant::now()) {
+            log::info!("unloaded idle translation model");
+        }
     }
 }
 
