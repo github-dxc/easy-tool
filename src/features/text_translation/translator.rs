@@ -91,8 +91,7 @@ impl TranslationService {
         if !settings.enabled {
             state.enabled = false;
             drop(state);
-            self.zh_to_en_model.lock().unwrap().unload_now();
-            self.en_to_zh_model.lock().unwrap().unload_now();
+            self.try_unload_loaded_models();
             return;
         }
 
@@ -171,6 +170,15 @@ impl TranslationService {
             if model.unload_if_idle(now) {
                 log::info!("unloaded idle en->zh translation model");
             }
+        }
+    }
+
+    fn try_unload_loaded_models(&self) {
+        if let Ok(mut model) = self.zh_to_en_model.try_lock() {
+            model.unload_now();
+        }
+        if let Ok(mut model) = self.en_to_zh_model.try_lock() {
+            model.unload_now();
         }
     }
 

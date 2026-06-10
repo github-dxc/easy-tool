@@ -7,6 +7,7 @@ use std::time::Duration;
 use slint::{CloseRequestResponse, ComponentHandle, Timer, TimerMode};
 
 use crate::TextTranslationWindow;
+use crate::features::text_translation::language::detect_translation_direction;
 use crate::features::text_translation::translator::TranslationService;
 use crate::settings::AppSettings;
 
@@ -93,6 +94,14 @@ pub fn trigger_translation(
 ) {
     let source_text = source_text.trim().to_string();
     if source_text.is_empty() {
+        if let Some(window) = weak_window.upgrade() {
+            window.set_translated_text("".into());
+            window.set_translating(false);
+        }
+        return;
+    }
+
+    if detect_translation_direction(&source_text).is_none() {
         if let Some(window) = weak_window.upgrade() {
             window.set_translated_text("".into());
             window.set_translating(false);

@@ -42,7 +42,7 @@ const MAX_GENERATED_TOKENS: usize = 512;
 /// Owns the loaded OCR model and reloads it when settings change.
 pub struct OcrService {
     state: Mutex<OcrState>,
-    model: Mutex<IdleModel<OcrModel>>,
+    model: Mutex<OcrModelSlot>,
 }
 
 struct OcrState {
@@ -57,6 +57,11 @@ struct OcrModel {
     vision_encoder: Session,
     embedding: Session,
     decoder: Session,
+}
+
+struct OcrModelSlot {
+    loaded_path: Option<PathBuf>,
+    model: IdleModel<OcrModel>,
 }
 
 struct PreparedImage {
@@ -90,7 +95,7 @@ impl OcrService {
                 tencent_cloud: tencent_cloud.clone(),
                 model_path: None,
             }),
-            model: Mutex::new(IdleModel::empty()),
+            model: Mutex::new(OcrModelSlot::empty()),
         };
         service.apply_settings(settings, ai_backend, tencent_cloud);
         service
@@ -113,7 +118,7 @@ impl OcrService {
         if !settings.enabled {
             state.enabled = false;
             drop(state);
-            self.model.lock().unwrap().unload_now();
+            self.try_unload_model();
             return;
         }
 
@@ -121,7 +126,7 @@ impl OcrService {
         drop(state);
 
         if model_path_changed {
-            self.model.lock().unwrap().unload_now();
+            self.try_unload_model();
         }
     }
 
@@ -160,11 +165,13 @@ impl OcrService {
                 Ok(recognized)
             }
             OcrRequest::Local(model_path) => {
-                let mut model = self.model.lock().unwrap();
-                let result = model
+                let mut slot = self.model.lock().unwrap();
+                slot.ensure_path(&model_path);
+                let result = slot
+                    .model
                     .get_or_try_load(|| OcrModel::load(&model_path))?
                     .recognize_streaming(image_path, on_partial);
-                model.refresh_idle_deadline(Instant::now());
+                slot.model.refresh_idle_deadline(Instant::now());
                 result
             }
         }
@@ -177,12 +184,84 @@ impl OcrService {
             }
         }
     }
+
+    fn try_unload_model(&self) {
+        if let Ok(mut model) = self.model.try_lock() {
+            model.unload_now();
+        }
+    }
 }
 
 enum OcrRequest {
     Tencent(TencentCloudSettings),
     Local(PathBuf),
 }
+
+impl OcrModelSlot {
+    fn empty() -> Self {
+        Self {
+            loaded_path: None,
+            model: IdleModel::empty(),
+        }
+    }
+
+    fn unload_now(&mut self) {
+        self.loaded_path = None;
+        self.model.unload_now();
+    }
+
+    fn unload_if_idle(&mut self, now: Instant) -> bool {
+        if self.model.unload_if_idle(now) {
+            self.loaded_path = None;
+            true
+        } else {
+            false
+        }
+    }
+
+    fn ensure_path(&mut self, requested_path: &Path) {
+        if self.loaded_path.as_deref() != Some(requested_path) {
+            self.unload_now();
+            self.loaded_path = Some(requested_path.to_path_buf());
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::OcrModelSlot;
+    use std::path::Path;
+
+    #[test]
+    fn model_slot_tracks_requested_path() {
+        let mut slot = OcrModelSlot::empty();
+
+        slot.ensure_path(Path::new("first"));
+
+        assert_eq!(slot.loaded_path.as_deref(), Some(Path::new("first")));
+    }
+
+    #[test]
+    fn model_slot_clears_loaded_path_when_unloaded() {
+        let mut slot = OcrModelSlot::empty();
+        slot.ensure_path(Path::new("first"));
+
+        slot.unload_now();
+
+        assert_eq!(slot.loaded_path, None);
+    }
+
+    #[test]
+    fn model_slot_replaces_stale_loaded_path() {
+        let mut slot = OcrModelSlot::empty();
+        slot.ensure_path(Path::new("first"));
+
+        slot.ensure_path(Path::new("second"));
+
+        assert_eq!(slot.loaded_path.as_deref(), Some(Path::new("second")));
+    }
+}
+
 impl OcrModel {
     fn load(path: &Path) -> Result<Self, String> {
         let model_dir = resolve_model_dir(path)?;
