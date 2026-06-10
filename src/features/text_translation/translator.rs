@@ -10,8 +10,17 @@ use ort::value::Tensor;
 use serde_json::Value;
 use tokenizers::Tokenizer;
 
+use crate::features::text_translation::language::{
+    DetectedTranslationDirection, detect_translation_direction,
+};
 use crate::infrastructure::idle_model::IdleModel;
-use crate::settings::TextTranslationSettings;
+use crate::infrastructure::tencent_cloud::client::{
+    TencentTranslationDirection, translate_text as translate_text_with_tencent,
+};
+use crate::settings::{
+    AiBackend, TencentCloudSettings, TextTranslationSettings,
+    default_en_to_zh_translation_model_path, default_zh_to_en_translation_model_path,
+};
 
 const DECODER_START_TOKEN_ID: i64 = 65000;
 const EOS_TOKEN_ID: i64 = 0;
@@ -31,8 +40,10 @@ pub struct TranslationService {
 
 struct TranslationState {
     enabled: bool,
-    model_path: PathBuf,
-    model: IdleModel<TranslationModel>,
+    ai_backend: AiBackend,
+    tencent_cloud: TencentCloudSettings,
+    zh_to_en_model: IdleModel<TranslationModel>,
+    en_to_zh_model: IdleModel<TranslationModel>,
 }
 
 struct TranslationModel {
@@ -48,30 +59,39 @@ struct SourceChunk {
 
 impl TranslationService {
     /// Creates the service without loading the model.
-    pub fn new(settings: &TextTranslationSettings) -> Self {
+    pub fn new(
+        settings: &TextTranslationSettings,
+        ai_backend: AiBackend,
+        tencent_cloud: &TencentCloudSettings,
+    ) -> Self {
         let service = Self {
             state: Mutex::new(TranslationState {
                 enabled: false,
-                model_path: settings.model_path(),
-                model: IdleModel::empty(),
+                ai_backend,
+                tencent_cloud: tencent_cloud.clone(),
+                zh_to_en_model: IdleModel::empty(),
+                en_to_zh_model: IdleModel::empty(),
             }),
         };
-        service.apply_settings(settings);
+        service.apply_settings(settings, ai_backend, tencent_cloud);
         service
     }
 
     /// Applies tray/config changes without loading the ONNX runtime plan.
-    pub fn apply_settings(&self, settings: &TextTranslationSettings) {
+    pub fn apply_settings(
+        &self,
+        settings: &TextTranslationSettings,
+        ai_backend: AiBackend,
+        tencent_cloud: &TencentCloudSettings,
+    ) {
         let mut state = self.state.lock().unwrap();
-        let model_path = settings.model_path();
-        if state.model_path != model_path {
-            state.model_path = model_path;
-            state.model.unload_now();
-        }
+        state.ai_backend = ai_backend;
+        state.tencent_cloud = tencent_cloud.clone();
 
         if !settings.enabled {
             state.enabled = false;
-            state.model.unload_now();
+            state.zh_to_en_model.unload_now();
+            state.en_to_zh_model.unload_now();
             return;
         }
 
@@ -96,22 +116,43 @@ impl TranslationService {
     pub fn translate_streaming_cancellable(
         &self,
         text: &str,
-        on_partial: impl FnMut(&str),
+        mut on_partial: impl FnMut(&str),
         should_cancel: impl Fn() -> bool,
     ) -> Result<String, String> {
+        let Some(direction) = detect_translation_direction(text) else {
+            return Ok(String::new());
+        };
+
         let mut state = self.state.lock().unwrap();
         if !state.enabled {
             return Err("text translation is disabled".into());
         }
 
-        let model_path = state.model_path.clone();
-        let result = {
-            let model = state
-                .model
-                .get_or_try_load(|| TranslationModel::load(&model_path))?;
-            model.translate_streaming(text, on_partial, should_cancel)
-        };
-        state.model.refresh_idle_deadline(Instant::now());
+        if state.ai_backend == AiBackend::Tencent {
+            let tencent_cloud = state.tencent_cloud.clone();
+            drop(state);
+
+            if should_cancel() {
+                return Ok(String::new());
+            }
+
+            let translated = translate_text_with_tencent(
+                &tencent_cloud,
+                backend_direction_for(direction),
+                text,
+            )?;
+            if !translated.is_empty() {
+                on_partial(&translated);
+            }
+            return Ok(translated);
+        }
+
+        let model_path = local_model_path_for_direction(direction);
+        let model = local_model_for_direction(&mut state, direction);
+        let result = model
+            .get_or_try_load(|| TranslationModel::load(&model_path))?
+            .translate_streaming(text, on_partial, should_cancel);
+        model.refresh_idle_deadline(Instant::now());
         result
     }
 
@@ -119,9 +160,37 @@ impl TranslationService {
         let Ok(mut state) = self.state.try_lock() else {
             return;
         };
-        if state.model.unload_if_idle(Instant::now()) {
-            log::info!("unloaded idle translation model");
+        let now = Instant::now();
+        if state.zh_to_en_model.unload_if_idle(now) {
+            log::info!("unloaded idle zh->en translation model");
         }
+        if state.en_to_zh_model.unload_if_idle(now) {
+            log::info!("unloaded idle en->zh translation model");
+        }
+    }
+}
+
+fn local_model_for_direction(
+    state: &mut TranslationState,
+    direction: DetectedTranslationDirection,
+) -> &mut IdleModel<TranslationModel> {
+    match direction {
+        DetectedTranslationDirection::ZhToEn => &mut state.zh_to_en_model,
+        DetectedTranslationDirection::EnToZh => &mut state.en_to_zh_model,
+    }
+}
+
+fn local_model_path_for_direction(direction: DetectedTranslationDirection) -> PathBuf {
+    match direction {
+        DetectedTranslationDirection::ZhToEn => default_zh_to_en_translation_model_path(),
+        DetectedTranslationDirection::EnToZh => default_en_to_zh_translation_model_path(),
+    }
+}
+
+fn backend_direction_for(direction: DetectedTranslationDirection) -> TencentTranslationDirection {
+    match direction {
+        DetectedTranslationDirection::ZhToEn => TencentTranslationDirection::ZhToEn,
+        DetectedTranslationDirection::EnToZh => TencentTranslationDirection::EnToZh,
     }
 }
 
@@ -552,9 +621,14 @@ fn banned_repeated_ngram_tokens(generated_ids: &[i64], ngram_size: usize) -> Vec
 #[cfg(test)]
 mod tests {
     use super::{
-        MAX_DECODER_SEQUENCE_LEN, MIN_DECODER_SEQUENCE_LEN, banned_repeated_ngram_tokens,
-        decoder_sequence_len_for_source, join_translated_chunks, repetition_adjusted_score,
-        split_text_segments,
+        MAX_DECODER_SEQUENCE_LEN, MIN_DECODER_SEQUENCE_LEN, backend_direction_for,
+        banned_repeated_ngram_tokens, decoder_sequence_len_for_source, join_translated_chunks,
+        local_model_path_for_direction, repetition_adjusted_score, split_text_segments,
+    };
+    use crate::features::text_translation::language::DetectedTranslationDirection;
+    use crate::infrastructure::tencent_cloud::client::TencentTranslationDirection;
+    use crate::settings::{
+        default_en_to_zh_translation_model_path, default_zh_to_en_translation_model_path,
     };
 
     #[test]
@@ -572,6 +646,30 @@ mod tests {
         let chunks = vec!["first".to_string(), "".to_string(), "second".to_string()];
 
         assert_eq!(join_translated_chunks(&chunks), "first\nsecond");
+    }
+
+    #[test]
+    fn maps_detected_direction_to_local_model_path() {
+        assert_eq!(
+            local_model_path_for_direction(DetectedTranslationDirection::ZhToEn),
+            default_zh_to_en_translation_model_path()
+        );
+        assert_eq!(
+            local_model_path_for_direction(DetectedTranslationDirection::EnToZh),
+            default_en_to_zh_translation_model_path()
+        );
+    }
+
+    #[test]
+    fn maps_detected_direction_to_tencent_direction() {
+        assert!(matches!(
+            backend_direction_for(DetectedTranslationDirection::ZhToEn),
+            TencentTranslationDirection::ZhToEn
+        ));
+        assert!(matches!(
+            backend_direction_for(DetectedTranslationDirection::EnToZh),
+            TencentTranslationDirection::EnToZh
+        ));
     }
 
     #[test]

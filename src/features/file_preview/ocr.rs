@@ -13,7 +13,8 @@ use serde_json::Value;
 use tokenizers::Tokenizer;
 
 use crate::infrastructure::idle_model::IdleModel;
-use crate::settings::ImageRecognitionSettings;
+use crate::infrastructure::tencent_cloud::client::recognize_image as recognize_image_with_tencent;
+use crate::settings::{AiBackend, ImageRecognitionSettings, TencentCloudSettings};
 
 const BOS_TOKEN: &str = "<|begin_of_sentence|>";
 const IMAGE_START_TOKEN: &str = "<|IMAGE_START|>";
@@ -45,6 +46,8 @@ pub struct OcrService {
 
 struct OcrState {
     enabled: bool,
+    ai_backend: AiBackend,
+    tencent_cloud: TencentCloudSettings,
     model_path: Option<PathBuf>,
     model: IdleModel<OcrModel>,
 }
@@ -75,20 +78,34 @@ struct DecoderLayerCache {
 }
 
 impl OcrService {
-    pub fn new(settings: &ImageRecognitionSettings) -> Self {
+    pub fn new(
+        settings: &ImageRecognitionSettings,
+        ai_backend: AiBackend,
+        tencent_cloud: &TencentCloudSettings,
+    ) -> Self {
         let service = Self {
             state: Mutex::new(OcrState {
                 enabled: false,
+                ai_backend,
+                tencent_cloud: tencent_cloud.clone(),
                 model_path: None,
                 model: IdleModel::empty(),
             }),
         };
-        service.apply_settings(settings);
+        service.apply_settings(settings, ai_backend, tencent_cloud);
         service
     }
 
-    pub fn apply_settings(&self, settings: &ImageRecognitionSettings) {
+    pub fn apply_settings(
+        &self,
+        settings: &ImageRecognitionSettings,
+        ai_backend: AiBackend,
+        tencent_cloud: &TencentCloudSettings,
+    ) {
         let mut state = self.state.lock().unwrap();
+        state.ai_backend = ai_backend;
+        state.tencent_cloud = tencent_cloud.clone();
+
         let model_path = settings.model_dir.clone();
         if state.model_path != model_path {
             state.model_path = model_path;
@@ -111,11 +128,22 @@ impl OcrService {
     pub fn recognize_streaming(
         &self,
         image_path: &Path,
-        on_partial: impl FnMut(&str),
+        mut on_partial: impl FnMut(&str),
     ) -> Result<String, String> {
         let mut state = self.state.lock().unwrap();
         if !state.enabled {
             return Err("图像识别已关闭".into());
+        }
+
+        if state.ai_backend == AiBackend::Tencent {
+            let tencent_cloud = state.tencent_cloud.clone();
+            drop(state);
+
+            let recognized = recognize_image_with_tencent(&tencent_cloud, image_path)?;
+            if !recognized.is_empty() {
+                on_partial(&recognized);
+            }
+            return Ok(recognized);
         }
 
         let model_path = state

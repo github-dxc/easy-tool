@@ -48,7 +48,12 @@ pub fn run() {
                 .load_or_create()
                 .expect("failed to load settings"),
         ));
-        let ocr_service = Arc::new(OcrService::new(&settings.lock().unwrap().image_recognition));
+        let settings_snapshot = settings.lock().unwrap().clone();
+        let ocr_service = Arc::new(OcrService::new(
+            &settings_snapshot.image_recognition,
+            settings_snapshot.ai_backend,
+            &settings_snapshot.tencent_cloud,
+        ));
         let file_preview_window = init_file_preview_window(true, Arc::clone(&ocr_service));
         show_file_preview_window(&file_preview_window, path.into());
         let model_cleanup_timer = slint::Timer::default();
@@ -86,10 +91,17 @@ pub fn run() {
     let time_trans_window = init_time_trans_window();
     let weak_window = time_trans_window.as_weak();
     let translation_cancel_generation = Arc::new(AtomicU64::new(0));
+    let settings_snapshot = settings.lock().unwrap().clone();
     let translation_service = Arc::new(TranslationService::new(
-        &settings.lock().unwrap().text_translation,
+        &settings_snapshot.text_translation,
+        settings_snapshot.ai_backend,
+        &settings_snapshot.tencent_cloud,
     ));
-    let ocr_service = Arc::new(OcrService::new(&settings.lock().unwrap().image_recognition));
+    let ocr_service = Arc::new(OcrService::new(
+        &settings_snapshot.image_recognition,
+        settings_snapshot.ai_backend,
+        &settings_snapshot.tencent_cloud,
+    ));
     let text_translation_window = init_text_translation_window(
         Arc::clone(&translation_cancel_generation),
         Arc::clone(&settings),

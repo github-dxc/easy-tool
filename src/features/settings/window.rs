@@ -13,7 +13,7 @@ use crate::platform::dialog::{open_folder_dialog, show_message_box};
 use crate::platform::window::activate_slint_window;
 use crate::settings::{
     AppSettings, ImageRecognitionSettings, SettingsStore, TextTranslationSettings,
-    TranslationDirection,
+    default_en_to_zh_translation_model_path, default_zh_to_en_translation_model_path,
 };
 
 pub fn init_settings_window(
@@ -166,20 +166,15 @@ pub fn show_settings_window(window: &SettingsWindow, settings: &AppSettings) {
     window.set_screenshot_enabled(settings.screenshot.enabled);
     window.set_image_recognition_enabled(settings.image_recognition.enabled);
     window.set_text_translation_enabled(settings.text_translation.enabled);
-    window
-        .set_zh_to_en_enabled(settings.text_translation.direction == TranslationDirection::ZhToEn);
+    window.set_zh_to_en_enabled(settings.text_translation.enabled);
     window.set_zh_to_en_model_dir(
-        settings
-            .text_translation
-            .zh_to_en_model_path()
+        default_zh_to_en_translation_model_path()
             .to_string_lossy()
             .to_string()
             .into(),
     );
     window.set_en_to_zh_model_dir(
-        settings
-            .text_translation
-            .en_to_zh_model_path()
+        default_en_to_zh_translation_model_path()
             .to_string_lossy()
             .to_string()
             .into(),
@@ -268,22 +263,15 @@ fn apply_settings_snapshot(
     screenshot_enabled: bool,
     image_recognition_enabled: bool,
     text_translation_enabled: bool,
-    zh_to_en_enabled: bool,
-    zh_to_en_model_dir: &str,
-    en_to_zh_model_dir: &str,
+    _zh_to_en_enabled: bool,
+    _zh_to_en_model_dir: &str,
+    _en_to_zh_model_dir: &str,
     image_recognition_model_dir: &str,
     text_translation_debounce_seconds: &str,
 ) {
     let new_text_translation = TextTranslationSettings {
         enabled: text_translation_enabled,
-        direction: if zh_to_en_enabled {
-            TranslationDirection::ZhToEn
-        } else {
-            TranslationDirection::EnToZh
-        },
         debounce_seconds: debounce_seconds_from_string(text_translation_debounce_seconds),
-        zh_to_en_model_dir: path_from_string(zh_to_en_model_dir),
-        en_to_zh_model_dir: path_from_string(en_to_zh_model_dir),
     };
     let new_image_recognition = ImageRecognitionSettings {
         enabled: image_recognition_enabled,
@@ -306,6 +294,14 @@ fn apply_settings_snapshot(
     }
 
     tray_menu_handles.sync_from_settings(&updated_settings);
-    translation_service.apply_settings(&updated_settings.text_translation);
-    ocr_service.apply_settings(&updated_settings.image_recognition);
+    translation_service.apply_settings(
+        &updated_settings.text_translation,
+        updated_settings.ai_backend,
+        &updated_settings.tencent_cloud,
+    );
+    ocr_service.apply_settings(
+        &updated_settings.image_recognition,
+        updated_settings.ai_backend,
+        &updated_settings.tencent_cloud,
+    );
 }

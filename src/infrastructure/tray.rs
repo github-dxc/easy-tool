@@ -9,7 +9,7 @@ use tray_icon::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIc
 
 use crate::assets::load_tray_icon;
 use crate::features::text_translation::translator::TranslationService;
-use crate::settings::{AppSettings, SettingsStore, TranslationDirection};
+use crate::settings::{AppSettings, SettingsStore};
 
 const COPY_TIMESTAMP_MENU_ID: &str = "copy_timestamp_enabled";
 const CLIPBOARD_HISTORY_MENU_ID: &str = "clipboard_history_enabled";
@@ -58,14 +58,10 @@ impl TrayMenuHandles {
             .set_checked(settings.clipboard_history.enabled);
         self.screenshot_item
             .set_checked(settings.screenshot.enabled);
-        self.text_translation_zh_en_item.set_checked(
-            settings.text_translation.enabled
-                && settings.text_translation.direction == TranslationDirection::ZhToEn,
-        );
-        self.text_translation_en_zh_item.set_checked(
-            settings.text_translation.enabled
-                && settings.text_translation.direction == TranslationDirection::EnToZh,
-        );
+        self.text_translation_zh_en_item
+            .set_checked(settings.text_translation.enabled);
+        self.text_translation_en_zh_item
+            .set_checked(settings.text_translation.enabled);
     }
 }
 
@@ -105,16 +101,14 @@ pub fn init_tray_icon(settings: &AppSettings) -> TrayState {
         TEXT_TRANSLATION_ZH_EN_MENU_ID,
         "中译英",
         true,
-        settings.text_translation.enabled
-            && settings.text_translation.direction == TranslationDirection::ZhToEn,
+        settings.text_translation.enabled,
         None,
     );
     let text_translation_en_zh_item = CheckMenuItem::with_id(
         TEXT_TRANSLATION_EN_ZH_MENU_ID,
         "英译中",
         true,
-        settings.text_translation.enabled
-            && settings.text_translation.direction == TranslationDirection::EnToZh,
+        settings.text_translation.enabled,
         None,
     );
     text_translation_menu
@@ -204,20 +198,26 @@ pub fn start_tray_event_pump(
                     let checked = text_translation_zh_en_item.is_checked();
                     if let Ok(mut settings) = settings.lock() {
                         settings.text_translation.enabled = checked;
-                        settings.text_translation.direction = TranslationDirection::ZhToEn;
                         text_translation_zh_en_item.set_checked(checked);
-                        text_translation_en_zh_item.set_checked(false);
-                        translation_service.apply_settings(&settings.text_translation);
+                        text_translation_en_zh_item.set_checked(checked);
+                        translation_service.apply_settings(
+                            &settings.text_translation,
+                            settings.ai_backend,
+                            &settings.tencent_cloud,
+                        );
                         save_settings(&settings_store, &settings);
                     }
                 } else if event.id.as_ref() == TEXT_TRANSLATION_EN_ZH_MENU_ID {
                     let checked = text_translation_en_zh_item.is_checked();
                     if let Ok(mut settings) = settings.lock() {
                         settings.text_translation.enabled = checked;
-                        settings.text_translation.direction = TranslationDirection::EnToZh;
-                        text_translation_zh_en_item.set_checked(false);
+                        text_translation_zh_en_item.set_checked(checked);
                         text_translation_en_zh_item.set_checked(checked);
-                        translation_service.apply_settings(&settings.text_translation);
+                        translation_service.apply_settings(
+                            &settings.text_translation,
+                            settings.ai_backend,
+                            &settings.tencent_cloud,
+                        );
                         save_settings(&settings_store, &settings);
                     }
                 } else if event.id.as_ref() == QUIT_MENU_ID {
