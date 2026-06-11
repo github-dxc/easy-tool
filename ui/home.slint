@@ -77,6 +77,7 @@ export component HomeWindow inherits Window {
     callback open_text_translation();
     callback open_file_preview();
     callback open_screenshot();
+    callback open_base64_convert();
     callback open_settings();
 
     Rectangle {
@@ -157,10 +158,18 @@ export component HomeWindow inherits Window {
                             alignment: start;
 
                             ToolTile {
-                                icon: @image-url("../assets/icons/screenshot-32.png");
+                                icon: @image-url("../assets/icons/screenshot.png");
                                 name: "截图";
                                 clicked => {
                                     root.open_screenshot();
+                                }
+                            }
+
+                            ToolTile {
+                                icon: @image-url("../assets/icons/base64.png");
+                                name: "Base64";
+                                clicked => {
+                                    root.open_base64_convert();
                                 }
                             }
                         }

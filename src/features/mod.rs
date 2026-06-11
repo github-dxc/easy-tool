@@ -1,5 +1,6 @@
 //! User-facing feature modules.
 
+pub mod base64_convert;
 pub mod clipboard_history;
 pub mod file_preview;
 pub mod home;

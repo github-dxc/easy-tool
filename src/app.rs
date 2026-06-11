@@ -24,6 +24,7 @@ use crate::features::file_preview::registry::register_file_context_menu;
 use crate::features::file_preview::window::{
     init_file_preview_window, show_empty_file_preview_window, show_file_preview_window,
 };
+use crate::features::base64_convert::window::{init_base64_convert_window, show_base64_convert_window};
 use crate::features::home::window::{init_home_window, show_home_window};
 use crate::features::screenshot::window::{
     cancel_screenshot_window, init_screenshot_window, show_screenshot_window,
@@ -54,6 +55,7 @@ struct AppWindows {
     time_trans: Option<crate::TimeTrans>,
     history: Option<crate::ClipboardHistoryWindow>,
     translation: Option<crate::TextTranslationWindow>,
+    base64_convert: Option<crate::Base64ConvertWindow>,
     file_preview: Option<crate::FilePreviewWindow>,
     screenshot: Option<crate::ScreenshotWindow>,
     settings: Option<crate::SettingsWindow>,
@@ -299,6 +301,16 @@ pub fn run() {
                 let weak = ensure_screenshot_window(&app_windows, &shortcut_windows);
                 if let Some(window) = weak.upgrade() {
                     show_screenshot_window(&window);
+                }
+            }
+        },
+        {
+            let app_windows = Rc::clone(&app_windows);
+            move || {
+                let weak = ensure_base64_convert_window(&app_windows);
+                if let Some(window) = weak.upgrade() {
+                    show_base64_convert_window(&window);
+                    activate_slint_window(&window);
                 }
             }
         },
@@ -655,6 +667,16 @@ fn ensure_file_preview_window(
     let window = windows
         .file_preview
         .get_or_insert_with(|| init_file_preview_window(false, ocr_service));
+    window.as_weak()
+}
+
+fn ensure_base64_convert_window(
+    app_windows: &Rc<RefCell<AppWindows>>,
+) -> slint::Weak<crate::Base64ConvertWindow> {
+    let mut windows = app_windows.borrow_mut();
+    let window = windows
+        .base64_convert
+        .get_or_insert_with(init_base64_convert_window);
     window.as_weak()
 }
 

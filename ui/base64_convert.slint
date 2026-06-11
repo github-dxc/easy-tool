@@ -1,0 +1,121 @@
+import { TextEdit } from "std-widgets.slint";
+import "../assets/font/NotoSans.ttf";
+
+export component Base64ConvertWindow inherits Window {
+    width: 620px;
+    height: 520px;
+    always-on-top: true;
+    title: "Base64 转换";
+    default-font-family: "Noto Sans";
+
+    in-out property <string> source_text: "";
+    in-out property <string> result_text: "";
+    in-out property <bool> encode_mode: true;
+
+    callback source_text_edited(text: string);
+    callback toggle_mode();
+
+    Rectangle {
+        background: #F6F7F9;
+
+        VerticalLayout {
+            padding: 14px;
+            spacing: 12px;
+
+            HorizontalLayout {
+                spacing: 8px;
+                alignment: center;
+
+                Rectangle {
+                    width: 80px;
+                    height: 28px;
+                    border-radius: 14px;
+                    background: root.encode_mode ? #2563EB : transparent;
+                    border-width: 1px;
+                    border-color: root.encode_mode ? #2563EB : #D9DDE3;
+
+                    encode_btn := TouchArea {
+                        clicked => {
+                            if (!root.encode_mode) {
+                                root.toggle_mode();
+                            }
+                        }
+                    }
+
+                    Text {
+                        text: "编码";
+                        color: root.encode_mode ? #FFFFFF : #6B7280;
+                        font-size: 13px;
+                        font-weight: 600;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+
+                Rectangle {
+                    width: 80px;
+                    height: 28px;
+                    border-radius: 14px;
+                    background: !root.encode_mode ? #2563EB : transparent;
+                    border-width: 1px;
+                    border-color: !root.encode_mode ? #2563EB : #D9DDE3;
+
+                    decode_btn := TouchArea {
+                        clicked => {
+                            if (root.encode_mode) {
+                                root.toggle_mode();
+                            }
+                        }
+                    }
+
+                    Text {
+                        text: "解码";
+                        color: !root.encode_mode ? #FFFFFF : #6B7280;
+                        font-size: 13px;
+                        font-weight: 600;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+
+            Rectangle {
+                height: (parent.height - 72px) / 2;
+                background: #FFFFFF;
+                border-color: #D9DDE3;
+                border-width: 1px;
+                border-radius: 6px;
+                clip: true;
+
+                TextEdit {
+                    width: parent.width;
+                    height: parent.height;
+                    wrap: word-wrap;
+                    font-size: 14px;
+                    text <=> root.source_text;
+                    edited(text) => {
+                        root.source_text_edited(text);
+                    }
+                }
+            }
+
+            Rectangle {
+                height: (parent.height - 72px) / 2;
+                background: #FFFFFF;
+                border-color: #D9DDE3;
+                border-width: 1px;
+                border-radius: 6px;
+                clip: true;
+
+                TextEdit {
+                    width: parent.width;
+                    height: parent.height;
+                    read-only: true;
+                    wrap: word-wrap;
+                    font-size: 14px;
+                    text: root.result_text;
+                }
+            }
+        }
+    }
+}

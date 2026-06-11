@@ -12,6 +12,7 @@ pub fn init_home_window(
     open_text_translation: impl Fn() + 'static,
     open_file_preview: impl Fn() + 'static,
     open_screenshot: impl Fn() + 'static,
+    open_base64_convert: impl Fn() + 'static,
     open_settings: impl Fn() + 'static,
 ) -> HomeWindow {
     let window = HomeWindow::new().unwrap();
@@ -24,6 +25,7 @@ pub fn init_home_window(
     window.on_open_text_translation(open_text_translation);
     window.on_open_file_preview(open_file_preview);
     window.on_open_screenshot(open_screenshot);
+    window.on_open_base64_convert(open_base64_convert);
     window.on_open_settings(open_settings);
 
     window
