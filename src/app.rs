@@ -131,6 +131,7 @@ pub fn run() {
     info!("settings path: {}", settings_store.path().display());
 
     let translation_cancel_generation = Arc::new(AtomicU64::new(0));
+    let translation_pending = Arc::new(AtomicBool::new(false));
     let settings_snapshot = settings.lock().unwrap().clone();
     let translation_service = Arc::new(TranslationService::new(
         &settings_snapshot.text_translation,
@@ -455,12 +456,16 @@ pub fn run() {
 
             if event.name.as_deref() == Some("\u{3}") {
                 let settings_snapshot = settings.lock().unwrap().clone();
-                if settings_snapshot.text_translation.enabled {
+                if settings_snapshot.text_translation.enabled
+                    && !translation_pending.swap(true, Ordering::SeqCst)
+                {
                     let translation_service = Arc::clone(&translation_service);
                     let translation_cancel_generation = Arc::clone(&translation_cancel_generation);
+                    let translation_pending = Arc::clone(&translation_pending);
                     let shortcut_windows = shortcut_windows.clone();
                     let settings = Arc::clone(&settings);
-                    std::thread::spawn(move || {
+                    let _ = slint::invoke_from_event_loop(move || {
+                        let _guard = TranslationPendingGuard(translation_pending);
                         std::thread::sleep(Duration::from_millis(200));
 
                         let source_text = Clipboard::new()
@@ -472,29 +477,26 @@ pub fn run() {
                             return;
                         };
 
-                        slint::invoke_from_event_loop(move || {
-                            let weak = shortcut_windows.translation.lock().unwrap().clone();
-                            let weak = weak.unwrap_or_else(|| {
-                                let mut created = None;
-                                with_ui_app_windows(|app_windows| {
-                                    created = Some(ensure_text_translation_window(
-                                        app_windows,
-                                        &shortcut_windows,
-                                        Arc::clone(&translation_cancel_generation),
-                                        Arc::clone(&settings),
-                                        Arc::clone(&translation_service),
-                                    ));
-                                });
-                                created.expect("translation window registry should be initialized")
+                        let weak = shortcut_windows.translation.lock().unwrap().clone();
+                        let weak = weak.unwrap_or_else(|| {
+                            let mut created = None;
+                            with_ui_app_windows(|app_windows| {
+                                created = Some(ensure_text_translation_window(
+                                    app_windows,
+                                    &shortcut_windows,
+                                    Arc::clone(&translation_cancel_generation),
+                                    Arc::clone(&settings),
+                                    Arc::clone(&translation_service),
+                                ));
                             });
-                            trigger_translation(
-                                weak,
-                                translation_cancel_generation,
-                                translation_service,
-                                source_text,
-                            );
-                        })
-                        .expect("failed to create translation window");
+                            created.expect("translation window registry should be initialized")
+                        });
+                        trigger_translation(
+                            weak,
+                            translation_cancel_generation,
+                            translation_service,
+                            source_text,
+                        );
                     });
                 }
 
@@ -748,6 +750,15 @@ fn ensure_clipboard_listener_started(started: &Arc<AtomicBool>, deps: ClipboardL
     ) {
         started.store(false, Ordering::SeqCst);
         log::error!("failed to start clipboard history listener: {err}");
+    }
+}
+
+/// Resets the `translation_pending` flag on drop.
+struct TranslationPendingGuard(Arc<AtomicBool>);
+
+impl Drop for TranslationPendingGuard {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::SeqCst);
     }
 }
 
