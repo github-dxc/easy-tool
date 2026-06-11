@@ -108,6 +108,48 @@ pub fn display_size(time_window: &TimeTrans) -> Option<(f64, f64)> {
     (width > 0f64 && height > 0f64).then_some((width, height))
 }
 
+/// Returns the current monitor size in physical pixels for any Slint window.
+pub fn window_monitor_size(window: &impl ComponentHandle) -> Option<(f64, f64)> {
+    let mut result = None;
+    window.window().with_winit_window(|winit_window| {
+        if let Some(monitor) = winit_window.current_monitor() {
+            let size = monitor.size();
+            result = Some((size.width as f64, size.height as f64));
+        }
+    });
+    result
+}
+
+/// Centers the window on the current monitor.
+pub fn center_window(window: &(impl ComponentHandle + 'static)) {
+    center_window_when_ready(window.as_weak(), 5);
+}
+
+fn center_window_when_ready<T: ComponentHandle + 'static>(window: slint::Weak<T>, attempts_left: u8) {
+    slint::Timer::single_shot(TASKBAR_HIDE_RETRY_DELAY, move || {
+        let Some(window) = window.upgrade() else {
+            return;
+        };
+
+        if let Some((monitor_w, monitor_h)) = window_monitor_size(&window) {
+            let positioned = window.window().with_winit_window(|winit_window| {
+                let inner = winit_window.inner_size();
+                if inner.width == 0 || inner.height == 0 {
+                    return false;
+                }
+                let x = (monitor_w - inner.width as f64) / 2.0;
+                let y = (monitor_h - inner.height as f64) / 2.0;
+                winit_window.set_outer_position(PhysicalPosition::new(x, y));
+                true
+            });
+
+            if !positioned.unwrap_or(false) && attempts_left > 0 {
+                center_window_when_ready(window.as_weak(), attempts_left - 1);
+            }
+        }
+    });
+}
+
 #[cfg(target_os = "windows")]
 fn enable_hwnd_resize_and_maximize(hwnd: isize) {
     unsafe {

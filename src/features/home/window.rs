@@ -3,7 +3,7 @@
 use slint::{CloseRequestResponse, ComponentHandle};
 
 use crate::HomeWindow;
-use crate::platform::window::activate_slint_window;
+use crate::platform::window::{activate_slint_window, center_window};
 
 /// Builds the home window and binds each tool tile to the matching feature window.
 pub fn init_home_window(
@@ -37,5 +37,6 @@ pub fn show_home_window(window: &HomeWindow) {
     }
 
     let _ = window.show();
+    center_window(window);
     activate_slint_window(window);
 }

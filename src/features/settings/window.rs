@@ -11,7 +11,7 @@ use crate::features::file_preview::ocr::OcrService;
 use crate::features::text_translation::translator::TranslationService;
 use crate::infrastructure::tray::TrayMenuHandles;
 use crate::platform::dialog::{open_folder_dialog, show_message_box};
-use crate::platform::window::activate_slint_window;
+use crate::platform::window::{activate_slint_window, center_window};
 use crate::settings::{
     AiBackend, AppSettings, SettingsStore, TencentCloudSettings, TextTranslationSettings,
 };
@@ -223,6 +223,7 @@ pub fn show_settings_window(window: &SettingsWindow, settings: &AppSettings) {
     );
 
     let _ = window.show();
+    center_window(window);
     activate_slint_window(window);
 }
 

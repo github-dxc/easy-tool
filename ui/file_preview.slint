@@ -1,11 +1,11 @@
 import { Button, TextEdit } from "std-widgets.slint";
-import "../assets/font/AlibabaPuHuiTi-3-55-Regular.ttf";
+import "../assets/font/NotoSans.ttf";
 
 export component FilePreviewWindow inherits Window {
     width: 820px;
     height: 620px;
     title: root.file_name != "" ? root.file_name : "图片预览";
-    default-font-family: "Alibaba PuHuiTi 3.0";
+    default-font-family: "Noto Sans";
 
     in-out property <string> file_path: "";
     in-out property <string> file_name: "";
@@ -91,30 +91,36 @@ export component FilePreviewWindow inherits Window {
                 }
 
                 if root.has_content: Rectangle {
-                    width: 34px;
+                    width: 36px;
                     vertical-stretch: 1;
-                    background: tab_area.has-hover ? #E9EEF5 : #FFFFFF;
-                    border-color: root.ocr_panel_visible ? #7EA7D8 : #D9DDE3;
-                    border-width: 1px;
-                    border-radius: 6px;
-
-                    tab_area := TouchArea {
-                        clicked => {
-                            root.toggle_ocr_panel();
-                        }
-                    }
+                    background: transparent;
 
                     VerticalLayout {
-                        padding: 6px;
-                        spacing: 8px;
                         alignment: center;
+                        spacing: 4px;
+                        padding: 6px;
 
-                        Text {
-                            text: root.ocr_panel_visible ? "<" : ">";
-                            color: #345A85;
-                            font-size: 18px;
-                            font-weight: 700;
-                            horizontal-alignment: center;
+                        Rectangle {
+                            width: 32px;
+                            height: 32px;
+                            border-radius: 6px;
+                            border-width: 1px;
+                            border-color: #E5E7EB;
+                            background: root.ocr_panel_visible ? #DBEAFE : (translation_btn.has-hover ? #F3F4F6 : transparent);
+
+                            translation_btn := TouchArea {
+                                clicked => {
+                                    root.toggle_ocr_panel();
+                                }
+                            }
+
+                            Image {
+                                width: 20px;
+                                height: 20px;
+                                source: @image-url("../assets/icons/translation-32.png");
+                                image-fit: contain;
+                                colorize: root.ocr_panel_visible ? #2563EB : #6B7280;
+                            }
                         }
                     }
                 }

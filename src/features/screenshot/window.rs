@@ -726,7 +726,7 @@ fn draw_text_annotation(
     }
 
     let Some(font) = Font::try_from_bytes(include_bytes!(
-        "../../../assets/font/AlibabaPuHuiTi-3-55-Regular.ttf"
+        "../../../assets/font/NotoSans.ttf"
     ) as &[u8]) else {
         return;
     };
