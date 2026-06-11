@@ -38,7 +38,6 @@ pub struct TranslationService {
 }
 
 struct TranslationState {
-    enabled: bool,
     ai_backend: AiBackend,
     tencent_cloud: TencentCloudSettings,
     zh_to_en_model_path: PathBuf,
@@ -65,7 +64,6 @@ impl TranslationService {
     ) -> Self {
         let service = Self {
             state: Mutex::new(TranslationState {
-                enabled: false,
                 ai_backend,
                 tencent_cloud: tencent_cloud.clone(),
                 zh_to_en_model_path: settings.zh_to_en_model_path(),
@@ -95,14 +93,6 @@ impl TranslationService {
         state.zh_to_en_model_path = zh_to_en_model_path;
         state.en_to_zh_model_path = en_to_zh_model_path;
 
-        if !settings.enabled {
-            state.enabled = false;
-            drop(state);
-            self.try_unload_loaded_models();
-            return;
-        }
-
-        state.enabled = true;
         drop(state);
 
         if unload_zh_to_en && let Ok(mut model) = self.zh_to_en_model.try_lock() {
@@ -140,9 +130,6 @@ impl TranslationService {
 
         let request = {
             let state = self.state.lock().unwrap();
-            if !state.enabled {
-                return Err("text translation is disabled".into());
-            }
 
             match state.ai_backend {
                 AiBackend::Tencent => TranslationRequest::Tencent(state.tencent_cloud.clone()),

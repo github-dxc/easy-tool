@@ -1,4 +1,4 @@
-import "../assets/font/NotoSans.ttf";
+import "../assets/font/AlibabaPuHuiTi-3-55-Regular.ttf";
 import { ToolButton } from "./components/ToolButton.slint";
 import { ColorSwatch } from "./components/ColorSwatch.slint";
 import { StrokeOption } from "./components/StrokeOption.slint";
@@ -17,7 +17,7 @@ export component ScreenshotWindow inherits Window {
     no-frame: true;
     always-on-top: true;
     background: transparent;
-    default-font-family: "Noto Sans";
+    default-font-family: "Alibaba PuHuiTi 3.0";
 
     in-out property <image> screenshot;
     in-out property <[BrushSegment]> brush_segments;
@@ -129,7 +129,13 @@ export component ScreenshotWindow inherits Window {
 
         key-pressed(event) => {
             if (event.text == Key.Escape) {
-                root.cancel();
+                if (root.text_editor_visible) {
+                    root.clear_text_preview();
+                    root.text_editor_visible = false;
+                    root.text_editor_value = "";
+                } else {
+                    root.cancel();
+                }
                 accept
             } else {
                 reject
@@ -506,44 +512,32 @@ export component ScreenshotWindow inherits Window {
             border-radius: 2px;
             clip: true;
 
-            text_editor := TextInput {
-                x: 6px;
-                y: 2px;
-                width: parent.width - 12px;
-                height: parent.height - 4px;
-                text <=> root.text_editor_value;
-                font-size: root.selected_text_size * 1px;
-                color: transparent;
-                text-cursor-width: 1px;
-                selection-background-color: #CCE0FF;
-                selection-foreground-color: #202124;
-                edited => {
-                    root.preview_text(root.text_editor_left / 1px + 6, root.text_editor_top / 1px + 2, root.text_editor_value, root.selected_color_index, root.selected_text_size);
-                }
-                accepted => {
-                    if (root.text_editor_value != "") {
-                        root.draw_annotation("text", root.text_editor_left / 1px + 6, root.text_editor_top / 1px + 2, root.text_editor_left / 1px, root.text_editor_top / 1px, root.text_editor_value, root.selected_color_index, root.selected_stroke_width, root.selected_text_size);
+            FocusScope {
+                width: parent.width;
+                height: parent.height;
+                forward-focus: text_editor;
+
+                text_editor := TextInput {
+                    x: 6px;
+                    y: 2px;
+                    width: parent.width - 12px;
+                    height: parent.height - 4px;
+                    text <=> root.text_editor_value;
+                    font-size: root.selected_text_size * 1px;
+                    color: transparent;
+                    text-cursor-width: 1px;
+                    selection-background-color: #CCE0FF;
+                    selection-foreground-color: #202124;
+                    edited => {
+                        root.preview_text(root.text_editor_left / 1px + 6, root.text_editor_top / 1px + 2, root.text_editor_value, root.selected_color_index, root.selected_text_size);
                     }
-                    root.clear_text_preview();
-                    root.text_editor_visible = false;
-                    root.text_editor_value = "";
-                }
-                key-pressed(event) => {
-                    if (event.text == Key.Return) {
+                    accepted => {
                         if (root.text_editor_value != "") {
                             root.draw_annotation("text", root.text_editor_left / 1px + 6, root.text_editor_top / 1px + 2, root.text_editor_left / 1px, root.text_editor_top / 1px, root.text_editor_value, root.selected_color_index, root.selected_stroke_width, root.selected_text_size);
                         }
                         root.clear_text_preview();
                         root.text_editor_visible = false;
                         root.text_editor_value = "";
-                        accept
-                    } else if (event.text == Key.Escape) {
-                        root.clear_text_preview();
-                        root.text_editor_visible = false;
-                        root.text_editor_value = "";
-                        accept
-                    } else {
-                        reject
                     }
                 }
             }
