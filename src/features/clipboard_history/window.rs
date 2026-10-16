@@ -2,10 +2,12 @@
 
 use super::history::ClipboardHistoryItem;
 use super::service::ClipboardHistoryService;
-use crate::platform::window::{activate_slint_window, show_centered_window};
+use crate::platform::window::{drag_window, show_centered_window_if};
 use crate::{ClipboardHistoryRow, ClipboardHistoryWindow};
 use rdev::{EventType, Key, simulate};
-use slint::{ComponentHandle, Image, ModelRc, Rgba8Pixel, SharedPixelBuffer, VecModel};
+use slint::{
+    CloseRequestResponse, ComponentHandle, Image, ModelRc, Rgba8Pixel, SharedPixelBuffer, VecModel,
+};
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -18,10 +20,23 @@ pub fn init_clipboard_history_window(
 ) -> ClipboardHistoryWindow {
     let window = ClipboardHistoryWindow::new().unwrap();
     let weak = window.as_weak();
+    window.on_move_window(move || {
+        if let Some(window) = weak.upgrade() {
+            drag_window(&window);
+        }
+    });
+    let weak = window.as_weak();
     window.on_cancel(move || {
         if let Some(ui) = weak.upgrade() {
-            let _ = ui.hide();
+            hide_clipboard_history_window(&ui);
         }
+    });
+    let weak = window.as_weak();
+    window.window().on_close_requested(move || {
+        if let Some(ui) = weak.upgrade() {
+            next_display_generation(&ui);
+        }
+        CloseRequestResponse::HideWindow
     });
 
     let weak = window.as_weak();
@@ -39,7 +54,7 @@ pub fn init_clipboard_history_window(
             }
         }
         if let Some(ui) = weak.upgrade() {
-            let _ = ui.hide();
+            hide_clipboard_history_window(&ui);
         }
         simulate_paste(Arc::clone(&suppress_shortcuts));
     });
@@ -76,30 +91,32 @@ fn simulate_paste(suppress_shortcuts: Arc<AtomicBool>) {
     });
 }
 
-/// 打开窗口前刷新内容，已显示时仅激活窗口。
+/// 菜单和快捷键共用此入口，刷新历史内容并在显示前完成居中定位。
 pub fn show_clipboard_history_window(
     window: &ClipboardHistoryWindow,
     service: &ClipboardHistoryService,
 ) {
-    if window.window().is_visible() {
-        activate_slint_window(window);
-        return;
-    }
     refresh_clipboard_history_window(window, service);
-    let _ = window.show();
-    activate_slint_window(window);
-}
-
-/// 从主页打开时刷新历史内容，并在显示前完成居中定位。
-pub fn show_centered_clipboard_history_window(
-    window: &ClipboardHistoryWindow,
-    service: &ClipboardHistoryService,
-) {
-    refresh_clipboard_history_window(window, service);
-    show_centered_window(
+    let generation = next_display_generation(window);
+    // 原生窗口创建期间保持隐藏，且关闭后不允许旧任务重新弹出窗口。
+    show_centered_window_if(
         window,
         slint::LogicalSize::new(window.get_initial_width(), window.get_initial_height()),
+        move |window| window.get_display_generation() == generation,
     );
+}
+
+/// 递增显示代次，让关闭或后续打开操作使旧的异步显示任务失效。
+fn next_display_generation(window: &ClipboardHistoryWindow) -> i32 {
+    let generation = window.get_display_generation().wrapping_add(1);
+    window.set_display_generation(generation);
+    generation
+}
+
+/// 隐藏历史窗口，同时取消尚未完成的居中显示任务。
+fn hide_clipboard_history_window(window: &ClipboardHistoryWindow) {
+    next_display_generation(window);
+    let _ = window.hide();
 }
 
 /// 使用历史快照重新构建窗口列表。

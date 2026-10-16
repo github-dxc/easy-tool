@@ -1,71 +1,102 @@
-import { TextEdit } from "std-widgets.slint";
+import { CompactButton, CompactHeader, CompactTextArea } from "components/compact.slint";
 import "../assets/font/AlibabaPuHuiTi-3-55-Regular.ttf";
 
 export component TextTranslationWindow inherits Window {
-    // 将页面逻辑尺寸提供给原生窗口，确保首次显示前准确居中。
+    // 页面逻辑尺寸供原生窗口在首次显示前居中定位。
     out property <length> initial_width: root.width;
     out property <length> initial_height: root.height;
-    width: 620px;
-    height: 520px;
+    width: 360px;
+    height: 300px;
+    no-frame: true;
     always-on-top: true;
-    title: "翻译文本";
+    background: transparent;
+    title: "文本翻译";
     default-font-family: "Alibaba PuHuiTi 3.0";
+    forward-focus: source-editor;
 
     in-out property <string> source_text: "";
     in-out property <string> translated_text: "";
     in-out property <bool> translating: false;
+    in-out property <bool> copied: false;
+    // 关闭或重新打开时递增，使等待原生窗口创建的旧显示任务失效。
+    in-out property <int> display_generation: 0;
     callback source_text_edited(text: string);
+    callback copy_result();
+    callback close_window();
+    callback move_window();
 
-    Rectangle {
-        background: #F6F7F9;
+    changed translated_text => { root.copied = false; }
+    changed source_text => { root.copied = false; }
 
-        VerticalLayout {
-            padding: 14px;
-            spacing: 12px;
+    FocusScope {
+        capture-key-pressed(event) => {
+            if event.text == Key.Escape { root.close_window(); return accept; }
+            return reject;
+        }
+        Rectangle {
+            background: #FFFFFF;
+            border-radius: 8px;
+            border-width: 1px;
+            border-color: #D1D1D1;
+            clip: true;
 
-            Rectangle {
-                height: (parent.height - 40px) / 2;
-                background: #FFFFFF;
-                border-color: #D9DDE3;
-                border-width: 1px;
-                border-radius: 6px;
-                clip: true;
-
-                TextEdit {
-                    width: parent.width;
-                    height: parent.height;
-                    wrap: word-wrap;
-                    font-size: 14px;
-                    text <=> root.source_text;
-                    edited(text) => {
-                        root.source_text_edited(text);
+            VerticalLayout {
+                padding: 12px;
+                spacing: 8px;
+                CompactHeader {
+                    title: "文本翻译";
+                    caption: "中英互译";
+                    close => { root.close_window(); }
+                    drag => { root.move_window(); }
+                }
+                HorizontalLayout {
+                    height: 20px;
+                    Text {
+                        text: "原文";
+                        font-size: 11px;
+                        color: #939BA8;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                    }
+                    CompactButton {
+                        text: "清空";
+                        height: 20px;
+                        enabled: root.source_text != "";
+                        clicked => {
+                            root.source_text = "";
+                            root.translated_text = "";
+                            root.source_text_edited("");
+                            source-editor.focus();
+                        }
                     }
                 }
-            }
-
-            Rectangle {
-                height: (parent.height - 40px) / 2;
-                background: #FFFFFF;
-                border-color: #D9DDE3;
-                border-width: 1px;
-                border-radius: 6px;
-                clip: true;
-
-                TextEdit {
-                    width: parent.width;
-                    height: parent.height;
-                    read-only: true;
-                    wrap: word-wrap;
-                    font-size: 14px;
-                    text: root.translated_text;
+                source-editor := CompactTextArea {
+                    height: 80px;
+                    text <=> root.source_text;
+                    placeholder: "输入或粘贴文本，自动翻译";
+                    edited(text) => { root.source_text_edited(text); }
                 }
-
-                if root.translating && root.translated_text == "": Text {
-                    text: "翻译中...";
-                    color: #6B7280;
-                    font-size: 14px;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
+                HorizontalLayout {
+                    height: 20px;
+                    Text {
+                        text: root.translating ? "译文 · 翻译中…" : "译文";
+                        font-size: 11px;
+                        color: root.translating ? #3B5998 : #939BA8;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                    }
+                    CompactButton {
+                        text: root.copied ? "已复制" : "复制";
+                        height: 20px;
+                        enabled: root.translated_text != "" && !root.translating;
+                        clicked => { root.copy_result(); }
+                    }
+                }
+                CompactTextArea {
+                    vertical-stretch: 1;
+                    read-only: true;
+                    text: root.translated_text;
+                    placeholder: root.translating ? "正在翻译，请稍候…" : "译文会显示在这里";
                 }
             }
         }

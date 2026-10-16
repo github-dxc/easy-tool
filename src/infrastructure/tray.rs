@@ -3,60 +3,50 @@
 use std::time::Duration;
 
 use log::info;
-use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem};
+use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu};
 use tray_icon::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 
 use crate::assets::load_tray_icon;
-use crate::settings::AppSettings;
+use crate::settings::{AppSettings, CopyMode};
 
-const COPY_TIMESTAMP_MENU_ID: &str = "copy_timestamp_enabled";
 const CLIPBOARD_HISTORY_MENU_ID: &str = "clipboard_history_enabled";
-const TEXT_TRANSLATION_MENU_ID: &str = "text_translation_enabled";
 const QUIT_MENU_ID: &str = "quit";
 
 /// 托盘只发出用户动作，配置保存和服务更新交给应用控制器。
 pub enum TrayAction {
-    CopyTimestamp(bool),
+    CopyMode(CopyMode),
     ClipboardHistory(bool),
-    TextTranslation(bool),
 }
 
 /// Keeps tray UI handles alive and exposes menu items needed by the event pump.
 pub struct TrayState {
     pub icon: TrayIcon,
     pub menu: Menu,
-    copy_timestamp_item: CheckMenuItem,
-    clipboard_history_item: CheckMenuItem,
-    text_translation_item: CheckMenuItem,
+    handles: TrayMenuHandles,
 }
 
 #[derive(Clone)]
 pub struct TrayMenuHandles {
-    copy_timestamp_item: CheckMenuItem,
+    copy_mode_items: [(CopyMode, CheckMenuItem); 3],
     clipboard_history_item: CheckMenuItem,
-    text_translation_item: CheckMenuItem,
 }
 
 impl TrayState {
     /// 复制托盘菜单句柄，供应用控制器同步勾选状态。
     pub fn menu_handles(&self) -> TrayMenuHandles {
-        TrayMenuHandles {
-            copy_timestamp_item: self.copy_timestamp_item.clone(),
-            clipboard_history_item: self.clipboard_history_item.clone(),
-            text_translation_item: self.text_translation_item.clone(),
-        }
+        self.handles.clone()
     }
 }
 
 impl TrayMenuHandles {
     /// 根据实际生效的配置更新托盘菜单勾选状态。
     pub fn sync_from_settings(&self, settings: &AppSettings) {
-        self.copy_timestamp_item
-            .set_checked(settings.copy_timestamp.enabled);
+        let selected = settings.copy_mode;
+        for (mode, item) in &self.copy_mode_items {
+            item.set_checked(*mode == selected);
+        }
         self.clipboard_history_item
             .set_checked(settings.clipboard_history.enabled);
-        self.text_translation_item
-            .set_checked(settings.text_translation.enabled);
     }
 }
 
@@ -64,14 +54,20 @@ impl TrayMenuHandles {
 pub fn init_tray_icon(settings: &AppSettings) -> TrayState {
     let tray_menu = Menu::new();
 
-    let copy_timestamp_item = CheckMenuItem::with_id(
-        COPY_TIMESTAMP_MENU_ID,
-        "显示时间戳 - Ctrl+C",
-        true,
-        settings.copy_timestamp.enabled,
-        None,
-    );
-    tray_menu.append(&copy_timestamp_item).unwrap();
+    let copy_menu = Submenu::new("复制功能", true);
+    let selected = settings.copy_mode;
+    let copy_mode_items = CopyMode::ALL.map(|mode| {
+        let item = CheckMenuItem::with_id(
+            format!("copy_mode_{}", mode.index()),
+            mode.label(),
+            true,
+            mode == selected,
+            None,
+        );
+        copy_menu.append(&item).unwrap();
+        (mode, item)
+    });
+    tray_menu.append(&copy_menu).unwrap();
 
     let clipboard_history_item = CheckMenuItem::with_id(
         CLIPBOARD_HISTORY_MENU_ID,
@@ -81,15 +77,6 @@ pub fn init_tray_icon(settings: &AppSettings) -> TrayState {
         None,
     );
     tray_menu.append(&clipboard_history_item).unwrap();
-
-    let text_translation_item = CheckMenuItem::with_id(
-        TEXT_TRANSLATION_MENU_ID,
-        "翻译文本 - Ctrl+C",
-        true,
-        settings.text_translation.enabled,
-        None,
-    );
-    tray_menu.append(&text_translation_item).unwrap();
 
     tray_menu.append(&PredefinedMenuItem::separator()).unwrap();
 
@@ -108,9 +95,10 @@ pub fn init_tray_icon(settings: &AppSettings) -> TrayState {
     TrayState {
         icon: tray_icon,
         menu: tray_menu,
-        copy_timestamp_item,
-        clipboard_history_item,
-        text_translation_item,
+        handles: TrayMenuHandles {
+            copy_mode_items,
+            clipboard_history_item,
+        },
     }
 }
 
@@ -121,9 +109,7 @@ pub fn start_tray_event_pump(
     on_action: impl Fn(TrayAction) + 'static,
 ) -> slint::Timer {
     let tray_timer = slint::Timer::default();
-    let copy_timestamp_item = tray_state.copy_timestamp_item.clone();
-    let clipboard_history_item = tray_state.clipboard_history_item.clone();
-    let text_translation_item = tray_state.text_translation_item.clone();
+    let handles = tray_state.menu_handles();
 
     tray_timer.start(
         slint::TimerMode::Repeated,
@@ -143,15 +129,16 @@ pub fn start_tray_event_pump(
             while let Ok(event) = MenuEvent::receiver().try_recv() {
                 info!("menu event: {event:?}");
 
-                let action = if event.id.as_ref() == COPY_TIMESTAMP_MENU_ID {
-                    Some(TrayAction::CopyTimestamp(copy_timestamp_item.is_checked()))
+                let action = if let Some((mode, _)) = handles
+                    .copy_mode_items
+                    .iter()
+                    .find(|(_, item)| item.id() == &event.id)
+                {
+                    // 子菜单是单选；再次点击当前项仍选中，不能按复选框状态反向关闭。
+                    Some(TrayAction::CopyMode(*mode))
                 } else if event.id.as_ref() == CLIPBOARD_HISTORY_MENU_ID {
                     Some(TrayAction::ClipboardHistory(
-                        clipboard_history_item.is_checked(),
-                    ))
-                } else if event.id.as_ref() == TEXT_TRANSLATION_MENU_ID {
-                    Some(TrayAction::TextTranslation(
-                        text_translation_item.is_checked(),
+                        handles.clipboard_history_item.is_checked(),
                     ))
                 } else if event.id.as_ref() == QUIT_MENU_ID {
                     info!("quit application");

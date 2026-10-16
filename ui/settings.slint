@@ -1,4 +1,4 @@
-import { LineEdit, Switch } from "std-widgets.slint";
+import { ComboBox, LineEdit, Switch } from "std-widgets.slint";
 import "../assets/font/AlibabaPuHuiTi-3-55-Regular.ttf";
 
 export component SettingsWindow inherits Window {
@@ -10,9 +10,9 @@ export component SettingsWindow inherits Window {
     title: "设置";
     default-font-family: "Alibaba PuHuiTi 3.0";
 
-    in-out property <bool> copy_timestamp_enabled: true;
+    in-out property <int> copy_mode_index: 1;
     in-out property <bool> clipboard_history_enabled: true;
-    in-out property <bool> text_translation_enabled: false;
+    in-out property <bool> copy_mode_shortcut_enabled: false;
     in-out property <string> tencent_secret_id: "";
     in-out property <string> tencent_secret_key: "";
     in-out property <string> text_translation_debounce_seconds: "1";
@@ -32,7 +32,7 @@ export component SettingsWindow inherits Window {
 
             content := Rectangle {
                 width: parent.width;
-                height: 500px;
+                height: 560px;
 
                 VerticalLayout {
                     padding: 24px;
@@ -59,19 +59,18 @@ export component SettingsWindow inherits Window {
                                 spacing: 16px;
 
                                 Text {
-                                    text: "显示时间戳 - Ctrl+C";
+                                    text: "复制功能";
                                     color: #223041;
                                     font-size: 14px;
                                     vertical-alignment: center;
                                     width: 50%;
                                 }
 
-                                Switch {
-                                    checked <=> root.copy_timestamp_enabled;
-                                    text: self.checked ? "已开启" : "已关闭";
-                                    toggled => {
-                                        root.apply_settings();
-                                    }
+                                ComboBox {
+                                    horizontal-stretch: 1;
+                                    model: ["关闭", "转换时间戳", "翻译文本"];
+                                    current-index <=> root.copy_mode_index;
+                                    selected(_) => { root.apply_settings(); }
                                 }
                             }
 
@@ -99,7 +98,7 @@ export component SettingsWindow inherits Window {
                                 spacing: 16px;
 
                                 Text {
-                                    text: "文本翻译 - Ctrl+C";
+                                    text: "切换复制功能 - Ctrl+Alt+X";
                                     color: #223041;
                                     font-size: 14px;
                                     vertical-alignment: center;
@@ -107,11 +106,9 @@ export component SettingsWindow inherits Window {
                                 }
 
                                 Switch {
-                                    checked <=> root.text_translation_enabled;
+                                    checked <=> root.copy_mode_shortcut_enabled;
                                     text: self.checked ? "已开启" : "已关闭";
-                                    toggled => {
-                                        root.apply_settings();
-                                    }
+                                    toggled => { root.apply_settings(); }
                                 }
                             }
 

@@ -8,9 +8,7 @@ use slint::ComponentHandle;
 use crate::TimeTrans;
 use crate::config::{TIMEZONE_LABELS, TIMEZONES};
 use crate::features::time_trans::converter::trans_string_timestamp;
-use crate::platform::window::{
-    display_size, set_position, show_centered_tool_window, show_without_taskbar_icon,
-};
+use crate::platform::window::{hide_taskbar_icon, show_centered_tool_window};
 
 /// 创建时间转换浮窗，绑定显示、复制、转换、拖动及时区回调。
 pub fn init_time_trans_window() -> TimeTrans {
@@ -34,19 +32,10 @@ fn bind_visibility_callbacks(time_window: &TimeTrans) {
     let weak = time_window.as_weak();
     time_window.on_close_window(move || {
         if let Some(ui) = weak.upgrade() {
+            next_display_generation(&ui);
             ui.set_live_clock(false);
             ui.set_auto_close(true);
             let _ = ui.hide();
-        }
-    });
-
-    let weak = time_window.as_weak();
-    time_window.on_show_window(move || {
-        if let Some(ui) = weak.upgrade() {
-            // 主页入口负责居中后显示；只有复制触发模式允许转换结果自动显示浮窗。
-            if ui.get_auto_close() && !ui.window().is_visible() {
-                let _ = show_without_taskbar_icon(&ui);
-            }
         }
     });
 }
@@ -131,18 +120,64 @@ fn bind_timezone_callbacks(time_window: &TimeTrans) {
 
 /// 显示复制内容的转换结果，并将浮窗放到鼠标附近的可见位置。
 pub fn show_copied_timestamp(window: &TimeTrans, text: &str, position: (f64, f64)) {
+    let generation = next_display_generation(window);
     window.set_live_clock(false);
     window.set_auto_close(true);
     window.set_input_value(text.trim().into());
     window.set_close_time(3);
-    if !window.get_has_hover() {
-        let (x, y) = next_window_position(window, position);
-        set_position(window, x, y);
+    // 显式完成转换后再决定是否显示，相同文本再次复制也能重新触发定位。
+    window.invoke_update_result(
+        window.get_input_value(),
+        window.get_timestamp_unit(),
+        window.get_timezone_index(),
+    );
+    if window.get_result_value() == "Error" {
+        return;
+    }
+
+    let weak = window.as_weak();
+    if let Err(err) = slint::spawn_local(async move {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        if window.get_display_generation() != generation {
+            return;
+        }
+        // 首次使用时只创建隐藏的原生窗口，禁止在定位完成前显示默认位置。
+        let native = match window.window().winit_window().await {
+            Ok(native) => native,
+            Err(err) => {
+                log::error!("prepare copied timestamp window failed: {err}");
+                return;
+            }
+        };
+        if window.get_display_generation() != generation {
+            return;
+        }
+        let was_visible = window.window().is_visible();
+        if !was_visible {
+            hide_taskbar_icon(&window);
+            window.window().set_size(slint::LogicalSize::new(
+                window.get_initial_width(),
+                window.get_initial_height(),
+            ));
+        }
+        if !was_visible || !window.get_has_hover() {
+            let (x, y) = next_window_position(&native, position);
+            native.set_outer_position(winit::dpi::PhysicalPosition::new(x, y));
+        }
+        window.set_close_time(3);
+        if let Err(err) = window.show() {
+            log::error!("show copied timestamp window failed: {err}");
+        }
+    }) {
+        log::error!("schedule copied timestamp window failed: {err}");
     }
 }
 
 /// 从主页打开时填入当前时间并居中显示，开启每秒刷新及手动关闭模式。
 pub fn show_current_timestamp(window: &TimeTrans) {
+    next_display_generation(window);
     window.set_auto_close(false);
     window.set_live_clock(true);
     window.invoke_refresh_current_time();
@@ -150,6 +185,13 @@ pub fn show_current_timestamp(window: &TimeTrans) {
         window,
         slint::LogicalSize::new(window.get_initial_width(), window.get_initial_height()),
     );
+}
+
+/// 递增显示代次，让等待原生窗口的旧复制请求无法重新弹出浮窗。
+fn next_display_generation(window: &TimeTrans) -> i32 {
+    let generation = window.get_display_generation().wrapping_add(1);
+    window.set_display_generation(generation);
+    generation
 }
 
 /// 绑定实时刷新回调，按当前选中的时区生成可直接转换的时间字符串。
@@ -171,21 +213,86 @@ fn current_time_string(now: DateTime<Utc>, zone: &str) -> String {
         .to_string()
 }
 
-/// 在屏幕边缘留出浮窗空间，防止鼠标靠近边界时窗口溢出。
-fn next_window_position(window: &TimeTrans, (x, y): (f64, f64)) -> (f64, f64) {
-    if let Some((width, height)) = display_size(window) {
+/// 按鼠标所在屏幕与浮窗实际物理尺寸定位，兼容缩放、多屏及负坐标。
+fn next_window_position(window: &winit::window::Window, (x, y): (f64, f64)) -> (f64, f64) {
+    let monitor = window
+        .available_monitors()
+        .find(|monitor| {
+            let origin = monitor.position();
+            let size = monitor.size();
+            x >= origin.x as f64
+                && y >= origin.y as f64
+                && x < origin.x as f64 + size.width as f64
+                && y < origin.y as f64 + size.height as f64
+        })
+        .or_else(|| window.current_monitor())
+        .or_else(|| window.primary_monitor());
+    let Some(monitor) = monitor else {
+        return (x + 20.0, y + 10.0);
+    };
+    let origin = monitor.position();
+    let size = monitor.size();
+    let outer = window.outer_size();
+    // 移到另一块屏幕时缩放比例可能改变，按目标屏幕估算最终物理尺寸。
+    let scale = monitor.scale_factor() / window.scale_factor();
+    clamp_popup_position(
+        (x, y),
+        (origin.x as f64, origin.y as f64),
+        (size.width as f64, size.height as f64),
         (
-            (x + 20.0).min((width - 280.0).max(0.0)),
-            (y + 10.0).min((height - 135.0).max(0.0)),
-        )
-    } else {
-        (x, y)
-    }
+            (outer.width as f64 * scale).round(),
+            (outer.height as f64 * scale).round(),
+        ),
+    )
+}
+
+/// 优先放到鼠标右下方；靠近屏幕边缘时收回屏内，屏幕过小时对齐其左上角。
+fn clamp_popup_position(
+    (x, y): (f64, f64),
+    (left, top): (f64, f64),
+    (screen_width, screen_height): (f64, f64),
+    (window_width, window_height): (f64, f64),
+) -> (f64, f64) {
+    (
+        (x + 20.0).clamp(left, (left + screen_width - window_width).max(left)),
+        (y + 10.0).clamp(top, (top + screen_height - window_height).max(top)),
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 验证右下偏移、缩放后的边缘限制，以及位于主屏左侧的负坐标屏幕。
+    #[test]
+    fn popup_position_respects_cursor_screen_and_physical_size() {
+        assert_eq!(
+            clamp_popup_position((640.0, 360.0), (0.0, 0.0), (1920.0, 1080.0), (315.0, 150.0)),
+            (660.0, 370.0)
+        );
+        assert_eq!(
+            clamp_popup_position(
+                (1900.0, 1060.0),
+                (0.0, 0.0),
+                (1920.0, 1080.0),
+                (315.0, 150.0)
+            ),
+            (1605.0, 930.0)
+        );
+        assert_eq!(
+            clamp_popup_position(
+                (-1910.0, 100.0),
+                (-1920.0, 0.0),
+                (1920.0, 1080.0),
+                (315.0, 150.0)
+            ),
+            (-1890.0, 110.0)
+        );
+        assert_eq!(
+            clamp_popup_position((50.0, 50.0), (0.0, 0.0), (100.0, 80.0), (315.0, 150.0)),
+            (0.0, 0.0)
+        );
+    }
 
     /// 验证实时输入按所选时区显示，并能换算回同一个当前时间戳。
     #[test]

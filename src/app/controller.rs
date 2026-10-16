@@ -10,8 +10,7 @@ use super::shortcuts::{CopyDispatcher, start_shortcuts};
 use super::{AppEvent, windows::AppWindows};
 use crate::features::clipboard_history::service::ClipboardHistoryService;
 use crate::features::clipboard_history::window::{
-    refresh_clipboard_history_window, show_centered_clipboard_history_window,
-    show_clipboard_history_window,
+    refresh_clipboard_history_window, show_clipboard_history_window,
 };
 use crate::features::settings::window::{
     init_settings_window, show_settings_window, sync_settings_window,
@@ -23,7 +22,7 @@ use crate::features::time_trans::window::{show_copied_timestamp, show_current_ti
 use crate::infrastructure::paths::clipboard_history_dir;
 use crate::infrastructure::tray::{TrayAction, TrayMenuHandles};
 use crate::platform::dialog::show_message_box;
-use crate::settings::{AppSettings, SettingsService};
+use crate::settings::{AppSettings, CopyMode, SettingsService};
 
 pub(super) struct AppController {
     windows: RefCell<AppWindows>,
@@ -80,6 +79,24 @@ impl AppController {
     /// 在 UI 线程统一接收后台事件，配置开关在执行时再次检查。
     pub fn handle_event(&self, event: AppEvent) {
         match event {
+            AppEvent::SwitchCopyMode => {
+                let mut settings = self.settings.snapshot();
+                if settings.switch_copy_mode() {
+                    let feature = settings.copy_mode.label();
+                    // 复用配置入口，统一保存、同步托盘与页面，并取消被关闭的翻译请求。
+                    match self.apply_settings(settings) {
+                        // 仅在配置保存成功后提示，避免显示尚未生效的功能状态。
+                        Ok(()) => {
+                            self.windows
+                                .borrow_mut()
+                                .notify(&format!("切换ctrl+c快捷功能为{feature}！"));
+                        }
+                        Err(err) => {
+                            show_message_box("切换失败", &format!("无法保存设置：{err}"));
+                        }
+                    }
+                }
+            }
             AppEvent::ShowHistory => {
                 if self.settings.snapshot().clipboard_history.enabled {
                     self.show_history();
@@ -87,7 +104,7 @@ impl AppController {
             }
             AppEvent::CopyRequested { position } => {
                 let settings = self.settings.snapshot();
-                if settings.copy_timestamp.enabled || settings.text_translation.enabled {
+                if settings.copy_mode != CopyMode::Disabled {
                     self.copies.request(position);
                 }
             }
@@ -112,21 +129,24 @@ impl AppController {
         }
     }
 
-    /// 使用同一份复制文本分别触发时间转换和 API 翻译。
+    /// 根据当前选项执行复制功能，关闭时跳过处理。
     fn handle_copied_text(&self, text: String, position: (f64, f64)) {
         let settings = self.settings.snapshot();
-        if settings.copy_timestamp.enabled {
-            let window = self.windows.borrow_mut().timestamp();
-            show_copied_timestamp(&window, &text, position);
-        }
-        if settings.text_translation.enabled {
-            let window = self.translation_window();
-            trigger_translation(
-                window.as_weak(),
-                Arc::clone(&self.requests),
-                Arc::clone(&self.translation),
-                text,
-            );
+        match settings.copy_mode {
+            CopyMode::Timestamp => {
+                let window = self.windows.borrow_mut().timestamp();
+                show_copied_timestamp(&window, &text, position);
+            }
+            CopyMode::Translation => {
+                let window = self.translation_window();
+                trigger_translation(
+                    window.as_weak(),
+                    Arc::clone(&self.requests),
+                    Arc::clone(&self.translation),
+                    text,
+                );
+            }
+            CopyMode::Disabled => {}
         }
     }
 
@@ -136,16 +156,10 @@ impl AppController {
         show_current_timestamp(&window);
     }
 
-    /// 从历史服务读取最新数据并显示窗口。
+    /// 菜单和快捷键统一读取最新历史记录，并居中显示窗口。
     pub fn show_history(&self) {
         let window = self.history_window();
         show_clipboard_history_window(&window, &self.history);
-    }
-
-    /// 从主页打开历史窗口时刷新内容，并使用菜单入口的居中定位方式。
-    pub fn show_history_from_home(&self) {
-        let window = self.history_window();
-        show_centered_clipboard_history_window(&window, &self.history);
     }
 
     /// 获取历史窗口句柄，统一组装主页与快捷键入口所需的依赖。
@@ -195,9 +209,8 @@ impl AppController {
     pub fn handle_tray_action(&self, action: TrayAction) {
         let mut settings = self.settings.snapshot();
         match action {
-            TrayAction::CopyTimestamp(enabled) => settings.copy_timestamp.enabled = enabled,
+            TrayAction::CopyMode(mode) => settings.copy_mode = mode,
             TrayAction::ClipboardHistory(enabled) => settings.clipboard_history.enabled = enabled,
-            TrayAction::TextTranslation(enabled) => settings.text_translation.enabled = enabled,
         }
         if let Err(err) = self.apply_settings(settings) {
             // 菜单组件先切换了勾选状态，保存失败时恢复到实际生效值。
@@ -221,7 +234,9 @@ impl AppController {
         };
         self.translation.apply_settings(&settings.tencent_cloud);
         self.tray.sync_from_settings(&settings);
-        if previous.text_translation.enabled && !settings.text_translation.enabled {
+        if previous.copy_mode == CopyMode::Translation
+            && settings.copy_mode != CopyMode::Translation
+        {
             self.requests.cancel();
         }
         {

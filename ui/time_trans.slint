@@ -27,12 +27,13 @@ export component TimeTrans inherits Window {
     // 主页打开时持续显示当前时间；手动编辑或复制触发会退出实时模式。
     in-out property <bool> live_clock: false;
     in-out property <bool> auto_close: true;
+    // 复制定位等待原生窗口时，关闭、重新复制或主页打开可使旧请求失效。
+    in-out property <int> display_generation: 0;
 
     // 定义回调函数（rust函数）
     callback update_result(input: string, unit: bool, timezone_index: int);
     callback copy_to_clipboard(text: string);
     callback close_window();
-    callback show_window();
     callback move_window();
     callback last_timezone(i: int);
     callback next_timezone(i: int);
@@ -59,7 +60,6 @@ export component TimeTrans inherits Window {
     changed result_value => {
         if (root.result_value != "Error" && root.result_value != "") {
             root.close_time = 3;
-            show_window();
         }
     }
 

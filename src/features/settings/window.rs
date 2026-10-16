@@ -5,7 +5,7 @@ use slint::{CloseRequestResponse, ComponentHandle};
 use crate::SettingsWindow;
 use crate::platform::dialog::show_message_box;
 use crate::platform::window::show_centered_window;
-use crate::settings::{AppSettings, TencentCloudSettings, TextTranslationSettings};
+use crate::settings::{AppSettings, CopyMode, TencentCloudSettings};
 
 /// 创建设置页面；页面只收集输入，保存与服务更新由应用控制器负责。
 pub fn init_settings_window(
@@ -23,14 +23,11 @@ pub fn init_settings_window(
             return;
         };
         let mut updated_settings = AppSettings::default();
-        updated_settings.copy_timestamp.enabled = window.get_copy_timestamp_enabled();
+        updated_settings.copy_mode_shortcut_enabled = window.get_copy_mode_shortcut_enabled();
+        updated_settings.copy_mode = CopyMode::from_index(window.get_copy_mode_index());
         updated_settings.clipboard_history.enabled = window.get_clipboard_history_enabled();
-        updated_settings.text_translation = TextTranslationSettings {
-            enabled: window.get_text_translation_enabled(),
-            debounce_seconds: debounce_seconds_from_string(
-                &window.get_text_translation_debounce_seconds(),
-            ),
-        };
+        updated_settings.text_translation.debounce_seconds =
+            debounce_seconds_from_string(&window.get_text_translation_debounce_seconds());
         updated_settings.tencent_cloud = TencentCloudSettings {
             secret_id: window.get_tencent_secret_id().trim().to_string(),
             secret_key: window.get_tencent_secret_key().trim().to_string(),
@@ -64,9 +61,9 @@ pub fn show_settings_window(window: &SettingsWindow, settings: &AppSettings) {
 
 /// 同步页面数值而不改变窗口可见性，供托盘与设置入口共享使用。
 pub fn sync_settings_window(window: &SettingsWindow, settings: &AppSettings) {
-    window.set_copy_timestamp_enabled(settings.copy_timestamp.enabled);
+    window.set_copy_mode_shortcut_enabled(settings.copy_mode_shortcut_enabled);
+    window.set_copy_mode_index(settings.copy_mode.index());
     window.set_clipboard_history_enabled(settings.clipboard_history.enabled);
-    window.set_text_translation_enabled(settings.text_translation.enabled);
     window.set_tencent_secret_id(settings.tencent_cloud.secret_id.clone().into());
     window.set_tencent_secret_key(settings.tencent_cloud.secret_key.clone().into());
     let debounce_seconds = settings.text_translation.debounce_seconds.to_string();

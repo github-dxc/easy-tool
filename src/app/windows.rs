@@ -6,6 +6,7 @@ use crate::features::text_translation::requests::TranslationRequests;
 use crate::features::text_translation::translator::TranslationService;
 use crate::features::text_translation::window::init_text_translation_window;
 use crate::features::time_trans::window::init_time_trans_window;
+use crate::platform::notification::StatusNotification;
 use crate::settings::AppSettings;
 use slint::ComponentHandle;
 use std::sync::atomic::AtomicBool;
@@ -17,9 +18,26 @@ pub(super) struct AppWindows {
     pub history: Option<crate::ClipboardHistoryWindow>,
     pub translation: Option<crate::TextTranslationWindow>,
     pub settings: Option<crate::SettingsWindow>,
+    notification: Option<StatusNotification>,
 }
 
 impl AppWindows {
+    /// 复用同一个短暂提示窗口，连续切换时更新内容并重新开始一秒倒计时。
+    pub fn notify(&mut self, message: &str) {
+        if self.notification.is_none() {
+            match StatusNotification::new() {
+                Ok(notification) => self.notification = Some(notification),
+                Err(err) => {
+                    log::error!("create status notification failed: {err}");
+                    return;
+                }
+            }
+        }
+        if let Some(notification) = &self.notification {
+            notification.show(message);
+        }
+    }
+
     /// 按需创建时间转换窗口，返回句柄副本以便及时释放容器借用。
     pub fn timestamp(&mut self) -> crate::TimeTrans {
         self.timestamp

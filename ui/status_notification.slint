@@ -1,0 +1,36 @@
+import "../assets/font/AlibabaPuHuiTi-3-55-Regular.ttf";
+
+export component StatusNotificationWindow inherits Window {
+    width: 360px;
+    height: 68px;
+    no-frame: true;
+    always-on-top: true;
+    background: transparent;
+    title: "easy-tool 状态提示";
+    default-font-family: "Alibaba PuHuiTi 3.0";
+    in property <string> message;
+
+    Rectangle {
+        background: #FFFFFF;
+        border-radius: 8px;
+        border-width: 1px;
+        border-color: #D1D1D1;
+
+        HorizontalLayout {
+            padding: 16px;
+            spacing: 12px;
+            Rectangle {
+                width: 4px;
+                border-radius: 2px;
+                background: #3B5998;
+            }
+            Text {
+                text: root.message;
+                font-size: 13px;
+                color: #223041;
+                vertical-alignment: center;
+                wrap: word-wrap;
+            }
+        }
+    }
+}

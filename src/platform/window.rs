@@ -31,6 +31,13 @@ pub fn set_window_position(window: &impl ComponentHandle, x: f64, y: f64) {
     });
 }
 
+/// 将自绘标题栏的拖动请求转交给原生窗口，保持系统拖动行为。
+pub fn drag_window(window: &impl ComponentHandle) {
+    window.window().with_winit_window(|native| {
+        let _ = native.drag_window();
+    });
+}
+
 /// 获取时间转换浮窗所在显示器的尺寸。
 pub fn display_size(time_window: &TimeTrans) -> Option<(f64, f64)> {
     let mut width = 0f64;
@@ -51,7 +58,18 @@ pub fn show_centered_window<T>(window: &T, size: slint::LogicalSize)
 where
     T: ComponentHandle + 'static,
 {
-    show_centered_window_with_style(window, size, false);
+    show_centered_window_with_style(window, size, false, |_| true);
+}
+
+/// 仅在显示请求仍有效时居中打开窗口，避免异步创建完成后重新弹出已关闭的页面。
+pub fn show_centered_window_if<T>(
+    window: &T,
+    size: slint::LogicalSize,
+    should_show: impl Fn(&T) -> bool + 'static,
+) where
+    T: ComponentHandle + 'static,
+{
+    show_centered_window_with_style(window, size, false, should_show);
 }
 
 /// 先应用隐藏任务栏图标的工具窗口样式，再居中显示浮窗。
@@ -59,12 +77,16 @@ pub fn show_centered_tool_window<T>(window: &T, size: slint::LogicalSize)
 where
     T: ComponentHandle + 'static,
 {
-    show_centered_window_with_style(window, size, true);
+    show_centered_window_with_style(window, size, true, |_| true);
 }
 
 /// 在原生窗口就绪后统一完成样式、尺寸、位置和显示，避免首次显示跳动。
-fn show_centered_window_with_style<T>(window: &T, size: slint::LogicalSize, tool_window: bool)
-where
+fn show_centered_window_with_style<T>(
+    window: &T,
+    size: slint::LogicalSize,
+    tool_window: bool,
+    should_show: impl Fn(&T) -> bool + 'static,
+) where
     T: ComponentHandle + 'static,
 {
     let weak = window.as_weak();
@@ -73,6 +95,9 @@ where
         let Some(window) = weak.upgrade() else {
             return;
         };
+        if !should_show(&window) {
+            return;
+        }
         let native = match window.window().winit_window().await {
             Ok(native) => native,
             Err(err) => {
@@ -80,6 +105,10 @@ where
                 return;
             }
         };
+        // 等待原生窗口期间用户可能已关闭页面，显示前必须再次确认。
+        if !should_show(&window) {
+            return;
+        }
         if tool_window {
             hide_taskbar_icon(&window);
         }

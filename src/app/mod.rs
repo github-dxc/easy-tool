@@ -21,6 +21,7 @@ use slint::ComponentHandle;
 /// 区分后台事件，跨线程只传数据，不传递 Slint 窗口或应用控制器。
 pub(super) enum AppEvent {
     ShowHistory,
+    SwitchCopyMode,
     CopyRequested {
         position: (f64, f64),
     },
@@ -56,7 +57,7 @@ pub fn run() {
         },
         {
             let app = Rc::clone(&controller);
-            move || app.show_history_from_home()
+            move || app.show_history()
         },
         {
             let app = Rc::clone(&controller);

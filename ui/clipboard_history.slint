@@ -1,4 +1,5 @@
-import { Button, TextEdit } from "std-widgets.slint";
+import { ScrollView } from "std-widgets.slint";
+import { CompactButton, CompactHeader, CompactTextArea } from "components/compact.slint";
 import "../assets/font/AlibabaPuHuiTi-3-55-Regular.ttf";
 
 export struct ClipboardHistoryRow {
@@ -13,17 +14,22 @@ export struct ClipboardHistoryRow {
 }
 
 export component ClipboardHistoryWindow inherits Window {
-    // 将页面逻辑尺寸提供给原生窗口，确保首次显示前准确居中。
+    // 页面逻辑尺寸供原生窗口在首次显示前居中定位。
     out property <length> initial_width: root.width;
     out property <length> initial_height: root.height;
-    width: 520px;
-    height: 570px;
+    width: 380px;
+    height: 420px;
+    no-frame: true;
     always-on-top: false;
-    title: "复制历史";
+    background: transparent;
+    title: "剪贴板历史";
     default-font-family: "Alibaba PuHuiTi 3.0";
+    forward-focus: keyboard;
 
     in property <[ClipboardHistoryRow]> entries;
     in-out property <int> selected_index: 0;
+    // 关闭或重新打开时使尚未完成的原生窗口显示任务失效。
+    in-out property <int> display_generation: 0;
     in-out property <string> current_kind: "";
     in-out property <string> current_detail: "";
     in-out property <string> current_full_text: "";
@@ -31,196 +37,181 @@ export component ClipboardHistoryWindow inherits Window {
     in-out property <bool> current_has_preview: false;
     in-out property <int> current_preview_width: 0;
     in-out property <int> current_preview_height: 0;
-
     callback paste(index: int);
     callback delete_entry(index: int);
     callback cancel();
+    callback move_window();
 
-    Rectangle {
-        background: #F7F7F7;
-        border-color: #D0D0D0;
-        border-width: 1px;
+    // 鼠标与键盘共用选择逻辑，并保证当前记录始终出现在列表可见区域。
+    function select-entry(index: int) {
+        if index < 0 || index >= root.entries.length { return; }
+        root.selected_index = index;
+        root.current_kind = root.entries[index].kind;
+        root.current_detail = root.entries[index].detail;
+        root.current_full_text = root.entries[index].full_text;
+        root.current_preview = root.entries[index].preview;
+        root.current_has_preview = root.entries[index].has_preview;
+        root.current_preview_width = root.entries[index].preview_width;
+        root.current_preview_height = root.entries[index].preview_height;
+        if index * 36px + history-scroll.viewport-y < 0px {
+            history-scroll.viewport-y = -index * 36px;
+        } else if (index + 1) * 36px + history-scroll.viewport-y > history-scroll.visible-height {
+            history-scroll.viewport-y = history-scroll.visible-height - (index + 1) * 36px;
+        }
+    }
 
-        VerticalLayout {
-            padding: 12px;
-            spacing: 10px;
+    keyboard := FocusScope {
+        capture-key-pressed(event) => {
+            if event.text == Key.Escape { root.cancel(); return accept; }
+            return reject;
+        }
+        key-pressed(event) => {
+            if event.text == Key.UpArrow { root.select-entry(max(0, root.selected_index - 1)); return accept; }
+            if event.text == Key.DownArrow { root.select-entry(min(root.entries.length - 1, root.selected_index + 1)); return accept; }
+            if event.text == Key.Return && root.entries.length > 0 { root.paste(root.selected_index); return accept; }
+            return reject;
+        }
+        Rectangle {
+            background: #FFFFFF;
+            border-radius: 8px;
+            border-width: 1px;
+            border-color: #D1D1D1;
+            clip: true;
 
-            Rectangle {
-                height: 200px;
-                background: white;
-                border-color: #DADCE0;
-                border-width: 1px;
-                border-radius: 6px;
-                clip: true;
-
-                if entries.length == 0: Text {
-                    text: "暂无复制记录";
-                    color: #70757A;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
+            VerticalLayout {
+                padding: 10px;
+                spacing: 8px;
+                CompactHeader {
+                    title: "剪贴板历史";
+                    caption: root.entries.length + " 条记录";
+                    close => { root.cancel(); }
+                    drag => { root.move_window(); }
                 }
-
-                Flickable {
-                    width: parent.width;
-                    height: parent.height;
-                    viewport-height: list.height;
-
-                    VerticalLayout {
+                Rectangle {
+                    height: 174px;
+                    clip: true;
+                    background: transparent;
+                    if root.entries.length == 0: VerticalLayout {
+                        alignment: center;
+                        spacing: 8px;
+                        Text {
+                            text: "还没有复制记录";
+                            font-size: 13px;
+                            color: #798393;
+                            horizontal-alignment: center;
+                        }
+                        Text {
+                            text: "复制的文本、图片和文件会显示在这里";
+                            font-size: 11px;
+                            color: #A1A8B4;
+                            horizontal-alignment: center;
+                        }
+                    }
+                    history-scroll := ScrollView {
                         width: parent.width;
-                        list := Rectangle {
-                            width: parent.width;
-                            height: entries.length * 34px;
-
-                            for entry[index] in entries : Rectangle {
-                                width: list.width;
-                                y: index * 34px;
-                                height: 33px;
-                                border-width: 1px;
-                                border-color: index == selected_index ? #4C8BF5 : #E6E8EB;
-                                background: index == selected_index ? #EDF4FF : white;
-
-                                TouchArea {
-                                    width: parent.width - 36px;
-                                    height: parent.height;
-                                    clicked => {
-                                        root.selected_index = index;
-                                        root.current_kind = entry.kind;
-                                        root.current_detail = entry.detail;
-                                        root.current_full_text = entry.full_text;
-                                        root.current_preview = entry.preview;
-                                        root.current_has_preview = entry.has_preview;
-                                        root.current_preview_width = entry.preview_width;
-                                        root.current_preview_height = entry.preview_height;
-                                    }
-                                    double-clicked => {
-                                        root.paste(root.selected_index);
-                                    }
+                        height: parent.height;
+                        viewport-width: self.visible-width;
+                        viewport-height: root.entries.length * 36px;
+                        for entry[index] in root.entries: Rectangle {
+                            y: index * 36px;
+                            width: history-scroll.visible-width;
+                            height: 34px;
+                            border-radius: 5px;
+                            background: index == root.selected_index ? #EDF2FA : row-touch.has-hover ? #F6F7F9 : transparent;
+                            row-touch := TouchArea {
+                                clicked => { root.select-entry(index); keyboard.focus(); }
+                                double-clicked => { root.paste(index); }
+                            }
+                            Rectangle {
+                                x: 7px;
+                                y: 6px;
+                                width: 24px;
+                                height: 22px;
+                                border-radius: 4px;
+                                background: entry.kind == "text" ? #E3EAF6 : entry.kind == "image" ? #E5F1EB : #F4EEDD;
+                                Text {
+                                    text: entry.kind == "text" ? "文" : entry.kind == "image" ? "图" : "件";
+                                    font-size: 10px;
+                                    color: entry.kind == "text" ? #5A739F : entry.kind == "image" ? #5A8D73 : #A18B56;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
                                 }
-
-                                HorizontalLayout {
-                                    width: parent.width;
-                                    height: parent.height;
-                                    padding-left: 8px;
-                                    padding-right: 8px;
-                                    spacing: 8px;
-
-                                    Rectangle {
-                                        width: 44px;
-                                        height: 22px;
-                                        y: (parent.height - self.height) / 2;
-                                        background: entry.kind == "text" ? #E8F0FE : entry.kind == "image" ? #E6F4EA : #FEF7E0;
-                                        border-color: entry.kind == "text" ? #4C8BF5 : entry.kind == "image" ? #34A853 : #F9AB00;
-                                        border-width: 1px;
-                                        border-radius: 4px;
-
-                                        Text {
-                                            text: entry.kind == "text" ? "TEXT" : entry.kind == "image" ? "IMG" : "FILE";
-                                            color: #5F6368;
-                                            font-size: 10px;
-                                            font-weight: 700;
-                                            horizontal-alignment: center;
-                                            vertical-alignment: center;
-                                        }
-                                    }
-
-                                    Text {
-                                        text: index + 1;
-                                        width: 14px;
-                                        color: #5F6368;
-                                        font-size: 13px;
-                                        vertical-alignment: center;
-                                    }
-
-                                    Text {
-                                        text: entry.title;
-                                        color: #202124;
-                                        font-size: 14px;
-                                        vertical-alignment: center;
-                                        horizontal-stretch: 1;
-                                    }
-
-                                    // 删除按钮
-                                    VerticalLayout {
-                                        alignment: center; // 垂直方向居中对齐
-                                        Rectangle {
-                                            width: 24px;
-                                            height: 22px;
-                                            background: touch.pressed ? #eee : touch.has-hover ? #f5f5f5 : transparent;
-                                            border-radius: 4px;
-
-                                            Text {
-                                                text: "×";
-                                                font-size: 16px;
-                                                // 核心居中属性
-                                                horizontal-alignment: center;
-                                                vertical-alignment: center;
-                                            }
-
-                                            touch := TouchArea {
-                                                clicked => { root.delete_entry(index); }
-                                            }
-                                        }
-                                    }
-                                }
+                            }
+                            Text {
+                                x: 40px;
+                                width: parent.width - 77px;
+                                text: entry.title;
+                                font-size: 12px;
+                                color: index == root.selected_index ? #2E4C7C : #475263;
+                                overflow: elide;
+                                vertical-alignment: center;
+                            }
+                            CompactButton {
+                                x: parent.width - self.width - 4px;
+                                y: 5px;
+                                text: "×";
+                                icon: true;
+                                opacity: index == root.selected_index || row-touch.has-hover || self.active ? 1 : 0;
+                                accessible-label: "删除记录";
+                                clicked => { root.delete_entry(index); }
                             }
                         }
                     }
                 }
-            }
-
-            Rectangle {
-                height: 300px;
-                background: #FFFFFF;
-                border-color: #DADCE0;
-                border-width: 1px;
-                border-radius: 6px;
-                clip: true;
-
-                if entries.length == 0: Text {
-                    text: "";
+                HorizontalLayout {
+                    height: 18px;
+                    Text {
+                        text: "预览";
+                        font-size: 11px;
+                        color: #939BA8;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                    }
+                    Text {
+                        text: root.entries.length == 0 ? "" : root.current_kind == "text" ? "文本" : root.current_kind == "image" ? "图片" : "文件";
+                        font-size: 11px;
+                        color: #A1A8B4;
+                        vertical-alignment: center;
+                    }
                 }
-
-                if current_has_preview: Rectangle {
-                    background: #F1F3F4;
-
-                    Image {
-                        width: root.current_preview_width * 1px;
-                        height: root.current_preview_height * 1px;
-                        x: (parent.width - self.width) / 2;
-                        y: (parent.height - self.height) / 2;
+                Rectangle {
+                    vertical-stretch: 1;
+                    background: #F6F8FC;
+                    border-radius: 6px;
+                    clip: true;
+                    // 图片始终在可见区域内等比显示，避免紧凑布局裁掉内容。
+                    if root.current_has_preview: Image {
+                        x: 6px;
+                        y: 6px;
+                        width: parent.width - 12px;
+                        height: parent.height - 12px;
                         source: root.current_preview;
                         image-fit: contain;
                     }
-                }
-
-                if !current_has_preview: TextEdit {
-                    width: parent.width;
-                    height: parent.height;
-                    read-only: true;
-                    wrap: word-wrap;
-                    font-size: 14px;
-                    text: root.current_full_text != "" ? root.current_full_text : root.current_detail;
-                }
-            }
-
-            HorizontalLayout {
-                spacing: 8px;
-                alignment: end;
-
-                Button {
-                    height: 24px;
-                    text: "粘贴";
-                    enabled: entries.length > 0;
-                    clicked => {
-                        root.paste(root.selected_index);
+                    if !root.current_has_preview: CompactTextArea {
+                        width: parent.width;
+                        height: parent.height;
+                        read-only: true;
+                        text: root.current_full_text != "" ? root.current_full_text : root.current_detail;
+                        placeholder: "选择一条记录查看内容";
                     }
                 }
-
-                Button {
-                    height: 24px;
-                    text: "取消";
-                    clicked => {
-                        root.cancel();
+                HorizontalLayout {
+                    height: 28px;
+                    Text {
+                        text: "双击记录或按 Enter 粘贴";
+                        font-size: 11px;
+                        color: #939BA8;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                    }
+                    CompactButton {
+                        text: "粘贴";
+                        width: 60px;
+                        height: 26px;
+                        primary: true;
+                        enabled: root.entries.length > 0;
+                        clicked => { root.paste(root.selected_index); }
                     }
                 }
             }

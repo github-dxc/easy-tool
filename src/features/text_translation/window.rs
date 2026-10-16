@@ -4,7 +4,7 @@ use super::language::detect_translation_direction;
 use super::requests::TranslationRequests;
 use super::translator::TranslationService;
 use crate::TextTranslationWindow;
-use crate::platform::window::show_centered_window;
+use crate::platform::window::{drag_window, show_centered_window_if};
 use crate::settings::AppSettings;
 use slint::{CloseRequestResponse, ComponentHandle, Timer, TimerMode};
 use std::rc::Rc;
@@ -22,9 +22,46 @@ pub fn init_text_translation_window(
     let debounce_timer = Rc::new(Timer::default());
     let close_requests = Arc::clone(&requests);
     let close_timer = Rc::clone(&debounce_timer);
+    let weak_window = window.as_weak();
+    let button_requests = Arc::clone(&requests);
+    let button_timer = Rc::clone(&debounce_timer);
+    window.on_close_window(move || {
+        button_timer.stop();
+        button_requests.cancel();
+        if let Some(window) = weak_window.upgrade() {
+            next_display_generation(&window);
+            let _ = window.hide();
+        }
+    });
+    let weak_window = window.as_weak();
+    window.on_move_window(move || {
+        if let Some(window) = weak_window.upgrade() {
+            drag_window(&window);
+        }
+    });
+    let weak_window = window.as_weak();
+    window.on_copy_result(move || {
+        let Some(window) = weak_window.upgrade() else {
+            return;
+        };
+        let text = window.get_translated_text();
+        if text.is_empty() || window.get_translating() {
+            return;
+        }
+        match arboard::Clipboard::new()
+            .and_then(|mut clipboard| clipboard.set_text(text.to_string()))
+        {
+            Ok(()) => window.set_copied(true),
+            Err(err) => log::error!("copy translation result failed: {err}"),
+        }
+    });
+    let weak_window = window.as_weak();
     window.window().on_close_requested(move || {
         close_timer.stop();
         close_requests.cancel();
+        if let Some(window) = weak_window.upgrade() {
+            next_display_generation(&window);
+        }
         CloseRequestResponse::HideWindow
     });
     let weak_window = window.as_weak();
@@ -66,10 +103,7 @@ pub fn show_translation_editor(window: &TextTranslationWindow) {
     window.set_source_text("".into());
     window.set_translated_text("".into());
     window.set_translating(false);
-    show_centered_window(
-        window,
-        slint::LogicalSize::new(window.get_initial_width(), window.get_initial_height()),
-    );
+    show_centered_translation(window);
 }
 
 /// 展示当前输入及加载状态；调用方必须位于 UI 线程。
@@ -77,7 +111,27 @@ pub fn show_translation_pending(window: &TextTranslationWindow, source_text: &st
     window.set_source_text(source_text.into());
     window.set_translated_text("".into());
     window.set_translating(true);
-    let _ = window.show();
+    // 复制触发也必须先定位再显示；可见时仅更新内容，保留用户拖动后的位置。
+    if !window.window().is_visible() {
+        show_centered_translation(window);
+    }
+}
+
+/// 生成新的显示代次，让关闭页面及后续打开操作可以撤销尚未完成的定位任务。
+fn next_display_generation(window: &TextTranslationWindow) -> i32 {
+    let generation = window.get_display_generation().wrapping_add(1);
+    window.set_display_generation(generation);
+    generation
+}
+
+/// 统一菜单与复制触发的首次定位流程，只允许最新一次打开操作显示窗口。
+fn show_centered_translation(window: &TextTranslationWindow) {
+    let generation = next_display_generation(window);
+    show_centered_window_if(
+        window,
+        slint::LogicalSize::new(window.get_initial_width(), window.get_initial_height()),
+        move |window| window.get_display_generation() == generation,
+    );
 }
 
 /// 更新译文并结束加载状态，不额外改变窗口可见性。
