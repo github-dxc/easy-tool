@@ -3,6 +3,7 @@
 use easy_tool::*;
 
 // Keep the binary entry point minimal; all startup work lives in `app::run`.
+/// 启动桌面工具应用。
 fn main() {
     run();
 }

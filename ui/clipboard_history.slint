@@ -13,6 +13,9 @@ export struct ClipboardHistoryRow {
 }
 
 export component ClipboardHistoryWindow inherits Window {
+    // 将页面逻辑尺寸提供给原生窗口，确保首次显示前准确居中。
+    out property <length> initial_width: root.width;
+    out property <length> initial_height: root.height;
     width: 520px;
     height: 570px;
     always-on-top: false;
@@ -31,7 +34,6 @@ export component ClipboardHistoryWindow inherits Window {
 
     callback paste(index: int);
     callback delete_entry(index: int);
-    callback open_entry(index: int);
     callback cancel();
 
     Rectangle {
@@ -181,14 +183,6 @@ export component ClipboardHistoryWindow inherits Window {
                 if current_has_preview: Rectangle {
                     background: #F1F3F4;
 
-                    TouchArea {
-                        width: parent.width;
-                        height: parent.height;
-                        double-clicked => {
-                            root.open_entry(root.selected_index);
-                        }
-                    }
-
                     Image {
                         width: root.current_preview_width * 1px;
                         height: root.current_preview_height * 1px;
@@ -206,14 +200,6 @@ export component ClipboardHistoryWindow inherits Window {
                     wrap: word-wrap;
                     font-size: 14px;
                     text: root.current_full_text != "" ? root.current_full_text : root.current_detail;
-                }
-
-                if !current_has_preview: TouchArea {
-                    width: parent.width;
-                    height: parent.height;
-                    double-clicked => {
-                        root.open_entry(root.selected_index);
-                    }
                 }
             }
 

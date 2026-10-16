@@ -5,7 +5,7 @@ use std::thread;
 use log::error;
 use rdev::{Event, listen};
 
-/// Spawns the rdev listener and forwards each event to the provided handler.
+/// 创建全局输入监听线程，将键盘和鼠标事件转交调用方。
 pub fn start_global_input_listener<F>(event_handle: F) -> Result<(), String>
 where
     F: Fn(Event) -> Result<(), String> + Send + 'static,

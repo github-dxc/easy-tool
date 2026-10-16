@@ -2,6 +2,9 @@ import { LineEdit, VerticalBox, ComboBox, Button, Switch } from "std-widgets.sli
 import "../assets/font/AlibabaPuHuiTi-3-55-Regular.ttf";
 
 export component TimeTrans inherits Window {
+    // 将页面逻辑尺寸提供给原生窗口，确保首次显示前准确居中。
+    out property <length> initial_width: root.width;
+    out property <length> initial_height: root.height;
     no-frame: true;
     always-on-top: true;
     width: 210px;
@@ -21,6 +24,9 @@ export component TimeTrans inherits Window {
     in-out property <int> close_time: 3;
     out property <bool> has_hover: false;
     in-out property <bool> has_copy: false;
+    // 主页打开时持续显示当前时间；手动编辑或复制触发会退出实时模式。
+    in-out property <bool> live_clock: false;
+    in-out property <bool> auto_close: true;
 
     // 定义回调函数（rust函数）
     callback update_result(input: string, unit: bool, timezone_index: int);
@@ -30,6 +36,7 @@ export component TimeTrans inherits Window {
     callback move_window();
     callback last_timezone(i: int);
     callback next_timezone(i: int);
+    callback refresh_current_time();
 
     // 值变更回调
     changed input_value => {
@@ -43,7 +50,9 @@ export component TimeTrans inherits Window {
         }
     }
     changed timezone_index => {
-        if (root.input_value != "") {
+        if (root.live_clock) {
+            root.refresh_current_time();
+        } else if (root.input_value != "") {
             update_result(root.input_value, root.timestamp_unit, root.timezone_index);
         }
     }
@@ -54,12 +63,19 @@ export component TimeTrans inherits Window {
         }
     }
 
-    // 定时器
+    // 实时模式只更新输入，沿用原有转换回调同步刷新时间戳结果。
+    clock := Timer {
+        interval: 1s;
+        running: root.live_clock;
+        triggered => { root.refresh_current_time(); }
+    }
+
+    // 复制触发的浮窗保留倒计时；从主页打开的工具保持显示。
     timer := Timer {
         interval: 1s;
         running: true;
         triggered() => {
-            if (!root.has_hover && close_time > 0) {
+            if (root.auto_close && !root.has_hover && close_time > 0) {
                 close_time -= 1;
                 if (close_time == 0) {
                     root.close_window();
@@ -105,6 +121,7 @@ export component TimeTrans inherits Window {
                     LineEdit {
                         placeholder-text: "输入时间戳或时间字符串";
                         text <=> root.input_value;
+                        edited(_) => { root.live_clock = false; }
                     }
                 }
 

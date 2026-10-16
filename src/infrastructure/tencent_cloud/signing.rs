@@ -16,10 +16,12 @@ pub struct TencentSignatureInput<'a> {
     pub payload: &'a str,
 }
 
+/// 计算请求正文的 SHA-256，并返回小写十六进制摘要。
 pub fn hashed_payload(payload: &str) -> String {
     hex::encode(Sha256::digest(payload.as_bytes()))
 }
 
+/// 规范化请求头的名称与空白，并按头名称排序。
 pub fn canonical_headers(headers: &[(&str, &str)]) -> (String, String) {
     let mut normalized: Vec<(String, String)> = headers
         .iter()
@@ -40,12 +42,14 @@ pub fn canonical_headers(headers: &[(&str, &str)]) -> (String, String) {
     (canonical, signed_headers)
 }
 
+/// 计算 HMAC-SHA256，供签名密钥派生和请求签名使用。
 fn hmac_sha256(key: &[u8], message: &str) -> Vec<u8> {
     let mut mac = HmacSha256::new_from_slice(key).expect("HMAC accepts keys of any size");
     mac.update(message.as_bytes());
     mac.finalize().into_bytes().to_vec()
 }
 
+/// 按腾讯云 TC3 规则生成规范请求、派生签名并组装鉴权头。
 pub fn sign_v3(input: TencentSignatureInput<'_>) -> String {
     let _ = (input.action, input.version, input.region);
     let (canonical_headers, signed_headers) = canonical_headers(&[
@@ -79,6 +83,7 @@ mod tests {
     use super::*;
 
     #[test]
+    /// 验证请求头规范化包含小写、去空白和排序。
     fn canonical_headers_lowercases_trims_and_sorts_by_header_name() {
         let (canonical, signed) = canonical_headers(&[
             ("X-TC-Timestamp", "  1700000000 "),
@@ -94,6 +99,7 @@ mod tests {
     }
 
     #[test]
+    /// 验证正文摘要符合 SHA-256 小写十六进制格式。
     fn hashed_payload_returns_lowercase_sha256_hex() {
         assert_eq!(
             hashed_payload("{}"),
@@ -102,6 +108,7 @@ mod tests {
     }
 
     #[test]
+    /// 验证签名结果与已知腾讯云请求样例一致。
     fn sign_v3_matches_tencent_official_style_fixture() {
         let authorization = sign_v3(TencentSignatureInput {
             secret_id: "AKIDEXAMPLE",

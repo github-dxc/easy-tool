@@ -29,10 +29,12 @@ struct PersistedClipboardHistory {
     entries: Vec<ClipboardHistoryItem>,
 }
 
+/// 生成历史索引 JSON 文件的完整路径。
 pub fn history_index_path(dir: &Path) -> PathBuf {
     dir.join(HISTORY_INDEX_FILE)
 }
 
+/// 加载历史索引，清理重复及失效记录，并安全删除废弃缓存图片。
 pub fn load_history(dir: &Path) -> Result<ClipboardHistory, String> {
     let path = history_index_path(dir);
     if !path.exists() {
@@ -80,6 +82,7 @@ pub fn load_history(dir: &Path) -> Result<ClipboardHistory, String> {
     Ok(history)
 }
 
+/// 序列化历史快照，通过临时文件原子替换索引。
 pub fn save_history(dir: &Path, history: &ClipboardHistory) -> Result<(), String> {
     std::fs::create_dir_all(dir).map_err(|err| format!("create history dir failed: {err}"))?;
     let persisted = PersistedClipboardHistory {
@@ -90,6 +93,7 @@ pub fn save_history(dir: &Path, history: &ClipboardHistory) -> Result<(), String
     write_index_atomically(dir, &content)
 }
 
+/// 将剪贴板采集结果转换为历史条目，图片先持久化为缓存文件。
 pub fn item_from_capture(
     dir: &Path,
     captured: CapturedClipboardItem,
@@ -105,6 +109,7 @@ pub fn item_from_capture(
     }
 }
 
+/// 仅删除历史目录内由应用生成的图片，避免误删用户文件。
 pub fn delete_image_files(dir: &Path, paths: impl IntoIterator<Item = PathBuf>) {
     let Ok(history_dir) = dir.canonicalize() else {
         return;
@@ -125,6 +130,7 @@ pub fn delete_image_files(dir: &Path, paths: impl IntoIterator<Item = PathBuf>) 
     }
 }
 
+/// 检查文件名与扩展名是否符合应用缓存图片的命名约定。
 fn is_generated_clipboard_image_path(path: &Path) -> bool {
     path.file_name()
         .and_then(|file_name| file_name.to_str())
@@ -132,11 +138,13 @@ fn is_generated_clipboard_image_path(path: &Path) -> bool {
         && path.extension().and_then(|extension| extension.to_str()) == Some("png")
 }
 
+/// 规范化路径后判断文件是否确实位于指定目录内。
 fn is_existing_path_inside_dir(canonical_dir: &Path, path: &Path) -> bool {
     path.canonicalize()
         .is_ok_and(|candidate| candidate.starts_with(canonical_dir))
 }
 
+/// 验证图片存在且属于当前历史目录管理的缓存文件。
 fn is_managed_existing_clipboard_image_path(dir: &Path, path: &Path) -> bool {
     if !is_generated_clipboard_image_path(path) {
         return false;
@@ -146,6 +154,7 @@ fn is_managed_existing_clipboard_image_path(dir: &Path, path: &Path) -> bool {
         .is_ok_and(|history_dir| is_existing_path_inside_dir(&history_dir, path))
 }
 
+/// 写入临时索引并同步磁盘后替换旧索引，失败时保留原索引。
 fn write_index_atomically(dir: &Path, content: &str) -> Result<(), String> {
     std::fs::create_dir_all(dir).map_err(|err| format!("create history dir failed: {err}"))?;
     let index_path = history_index_path(dir);
@@ -175,12 +184,14 @@ fn write_index_atomically(dir: &Path, content: &str) -> Result<(), String> {
 }
 
 #[cfg(target_os = "windows")]
+/// 替换索引文件；Windows 使用允许覆盖目标的原生移动操作。
 fn replace_file(from: &Path, to: &Path) -> std::io::Result<()> {
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::Storage::FileSystem::{
         MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
     };
 
+    /// 将文件系统路径转换为以空字符结束的 Windows UTF-16 字符串。
     fn wide(path: &Path) -> Vec<u16> {
         path.as_os_str().encode_wide().chain(Some(0)).collect()
     }
@@ -203,10 +214,12 @@ fn replace_file(from: &Path, to: &Path) -> std::io::Result<()> {
 }
 
 #[cfg(not(target_os = "windows"))]
+/// 替换索引文件；Windows 使用允许覆盖目标的原生移动操作。
 fn replace_file(from: &Path, to: &Path) -> std::io::Result<()> {
     std::fs::rename(from, to)
 }
 
+/// 生成包含进程和时间信息的唯一临时索引路径。
 fn next_index_temp_path(dir: &Path) -> Result<PathBuf, String> {
     let timestamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -224,6 +237,7 @@ fn next_index_temp_path(dir: &Path) -> Result<PathBuf, String> {
     Err("could not allocate temporary history index path".to_string())
 }
 
+/// 校验 RGBA 像素数据并保存 PNG，返回基于文件引用的历史条目。
 fn persist_image_capture(
     dir: &Path,
     width: usize,
@@ -253,6 +267,7 @@ fn persist_image_capture(
     })
 }
 
+/// 生成不与现有缓存冲突的历史图片路径。
 fn next_image_path(dir: &Path) -> Result<PathBuf, String> {
     let timestamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -277,6 +292,7 @@ mod tests {
     use tempfile::tempdir;
 
     #[test]
+    /// 验证首次运行缺少索引时恢复为空历史。
     fn missing_index_loads_empty_history() {
         let dir = tempdir().unwrap();
 
@@ -286,6 +302,7 @@ mod tests {
     }
 
     #[test]
+    /// 验证文本条目写入磁盘后可按原顺序恢复。
     fn persists_and_reloads_text_entries() {
         let dir = tempdir().unwrap();
         let mut history = ClipboardHistory::default();
@@ -310,6 +327,7 @@ mod tests {
     }
 
     #[test]
+    /// 验证原子保存可以替换已存在的索引文件。
     fn write_index_atomically_replaces_existing_index() {
         let dir = tempdir().unwrap();
         let index_path = history_index_path(dir.path());
@@ -336,6 +354,7 @@ mod tests {
     }
 
     #[test]
+    /// 验证采集图片保存为 PNG，历史条目仅保留缓存引用。
     fn persists_image_capture_as_png_reference() {
         let dir = tempdir().unwrap();
         let rgba = vec![255, 0, 0, 255];
@@ -375,6 +394,7 @@ mod tests {
     }
 
     #[test]
+    /// 验证加载时移除失效图片并重写清理后的索引。
     fn load_skips_missing_image_files_and_rewrites_index() {
         let dir = tempdir().unwrap();
         let missing = dir.path().join("missing.png");
@@ -396,6 +416,7 @@ mod tests {
     }
 
     #[test]
+    /// 验证恢复时重复条目的废弃图片缓存被删除。
     fn load_deletes_duplicate_image_files_removed_during_recovery() {
         let dir = tempdir().unwrap();
         let newest_path = dir.path().join("clipboard-image-1-0.png");
@@ -454,6 +475,7 @@ mod tests {
     }
 
     #[test]
+    /// 验证混合历史去重时保留较新的图片记录。
     fn load_keeps_newer_duplicate_image_when_non_image_entry_is_newest() {
         let dir = tempdir().unwrap();
         let newest_path = dir.path().join("clipboard-image-2-0.png");
@@ -500,6 +522,7 @@ mod tests {
     }
 
     #[test]
+    /// 验证恢复时删除超出历史上限条目的图片缓存。
     fn load_deletes_over_limit_image_files_removed_during_recovery() {
         let dir = tempdir().unwrap();
         let entries = (0..21)
@@ -539,6 +562,7 @@ mod tests {
     }
 
     #[test]
+    /// 验证能够删除属于应用管理范围的缓存图片。
     fn delete_image_files_removes_existing_files() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("clipboard-image-1-0.png");
@@ -550,6 +574,7 @@ mod tests {
     }
 
     #[test]
+    /// 验证目录外即使命名相同的文件也不会被删除。
     fn delete_image_files_ignores_outside_paths_with_generated_names() {
         let dir = tempdir().unwrap();
         let outside = tempdir().unwrap();
@@ -562,6 +587,7 @@ mod tests {
     }
 
     #[test]
+    /// 验证目录外同名文件不会影响应用内的删除边界。
     fn delete_image_files_ignores_outside_paths_even_when_filename_collides() {
         let dir = tempdir().unwrap();
         let outside = tempdir().unwrap();
@@ -582,6 +608,7 @@ mod tests {
     }
 
     #[test]
+    /// 验证历史目录中的非应用生成文件不会被删除。
     fn delete_image_files_ignores_non_generated_names_inside_history_dir() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("image.png");
@@ -593,6 +620,7 @@ mod tests {
     }
 
     #[test]
+    /// 验证恢复时拒绝将目录外图片作为应用缓存记录。
     fn load_skips_existing_image_paths_outside_history_dir() {
         let dir = tempdir().unwrap();
         let outside = tempdir().unwrap();

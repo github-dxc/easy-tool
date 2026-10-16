@@ -7,7 +7,7 @@ use arboard::{Clipboard, ImageData};
 use crate::features::clipboard_history::history::ClipboardHistoryItem;
 use crate::features::clipboard_history::store::CapturedClipboardItem;
 
-/// Reads the current clipboard and converts supported formats into a history item.
+/// 读取当前剪贴板，依次识别文件列表、图片和非空文本。
 pub fn capture_clipboard_item() -> Option<CapturedClipboardItem> {
     if let Some(paths) = platform::get_clipboard_files() {
         if !paths.is_empty() {
@@ -41,7 +41,7 @@ pub fn capture_clipboard_item() -> Option<CapturedClipboardItem> {
     None
 }
 
-/// Writes a history item back to the clipboard so it can be pasted.
+/// 将历史记录按原始内容类型重新写入系统剪贴板。
 pub fn put_clipboard_item(item: &ClipboardHistoryItem) -> Result<(), String> {
     match item {
         ClipboardHistoryItem::Text { text } => Clipboard::new()
@@ -74,7 +74,7 @@ mod platform {
     use super::*;
 
     #[cfg(target_os = "windows")]
-    /// Reads Windows CF_HDROP file paths from the clipboard.
+    /// 读取 Windows 剪贴板中的文件路径列表；其他平台不返回文件。
     pub fn get_clipboard_files() -> Option<Vec<PathBuf>> {
         use std::os::windows::ffi::OsStringExt;
         use windows_sys::Win32::System::DataExchange::{
@@ -119,13 +119,13 @@ mod platform {
     }
 
     #[cfg(not(target_os = "windows"))]
-    /// File-list clipboard capture is currently implemented only for Windows.
+    /// 读取 Windows 剪贴板中的文件路径列表；其他平台不返回文件。
     pub fn get_clipboard_files() -> Option<Vec<PathBuf>> {
         None
     }
 
     #[cfg(target_os = "windows")]
-    /// Writes Windows CF_HDROP file paths to the clipboard.
+    /// 将文件路径列表写入 Windows 剪贴板；其他平台返回不支持错误。
     pub fn set_clipboard_files(paths: &[PathBuf]) -> Result<(), String> {
         use std::mem::size_of;
         use std::os::windows::ffi::OsStrExt;
@@ -192,7 +192,7 @@ mod platform {
     }
 
     #[cfg(not(target_os = "windows"))]
-    /// Falls back to newline-separated file paths on platforms without CF_HDROP.
+    /// 将文件路径列表写入 Windows 剪贴板；其他平台返回不支持错误。
     pub fn set_clipboard_files(paths: &[PathBuf]) -> Result<(), String> {
         Clipboard::new()
             .map_err(|err| format!("open clipboard failed: {err}"))?

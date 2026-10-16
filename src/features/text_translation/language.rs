@@ -4,6 +4,7 @@ pub enum DetectedTranslationDirection {
     EnToZh,
 }
 
+/// 统计中英文字符数量，自动选择中译英或英译中方向。
 pub fn detect_translation_direction(text: &str) -> Option<DetectedTranslationDirection> {
     if text.trim().is_empty() {
         return None;
@@ -26,6 +27,7 @@ pub fn detect_translation_direction(text: &str) -> Option<DetectedTranslationDir
     }
 }
 
+/// 判断字符是否属于受支持的中日韩统一表意文字区间。
 fn is_cjk(character: char) -> bool {
     matches!(
         character,
@@ -46,6 +48,7 @@ mod tests {
     use super::{DetectedTranslationDirection, detect_translation_direction};
 
     #[test]
+    /// 验证中文字符占多数时使用中译英。
     fn detects_chinese_majority_as_zh_to_en() {
         assert_eq!(
             detect_translation_direction("你好 a 世界"),
@@ -54,6 +57,7 @@ mod tests {
     }
 
     #[test]
+    /// 验证英文字母占多数时使用英译中。
     fn detects_english_majority_as_en_to_zh() {
         assert_eq!(
             detect_translation_direction("hello world 你"),
@@ -62,6 +66,7 @@ mod tests {
     }
 
     #[test]
+    /// 验证中英文数量相同时优先中译英。
     fn detects_chinese_tie_as_zh_to_en() {
         assert_eq!(
             detect_translation_direction("你a"),
@@ -70,6 +75,7 @@ mod tests {
     }
 
     #[test]
+    /// 验证英文计数仅包含 ASCII 字母。
     fn counts_ascii_alphabetic_characters() {
         assert_eq!(
             detect_translation_direction("你abc"),
@@ -78,11 +84,13 @@ mod tests {
     }
 
     #[test]
+    /// 验证仅空白输入不触发翻译。
     fn returns_none_for_whitespace() {
         assert_eq!(detect_translation_direction(" \n\t"), None);
     }
 
     #[test]
+    /// 验证纯标点与数字输入不触发翻译。
     fn returns_none_for_punctuation_and_numbers() {
         assert_eq!(detect_translation_direction("123, !?"), None);
     }

@@ -4,7 +4,7 @@ use chrono::{DateTime, NaiveDateTime, TimeZone, Utc};
 use chrono_tz::Tz;
 use regex::Regex;
 
-/// Converts supported timestamp/date strings in either seconds or milliseconds.
+/// 解析受支持的时间戳或日期字符串，按指定时区和单位转换。
 pub fn trans_string_timestamp(
     input: &str,
     unit: bool,
@@ -83,12 +83,14 @@ pub fn trans_string_timestamp(
     (Err("Error".to_string()), None)
 }
 
+/// 按指定格式和时区解析本地时间，拒绝歧义或不存在的时间。
 fn local_time_to_timestamp(input: &str, format: &str, tz: Tz, unit: bool) -> Option<String> {
     let naive_dt = NaiveDateTime::parse_from_str(input, format).ok()?;
     let dt = tz.from_local_datetime(&naive_dt).single()?;
     Some(scale_timestamp(dt.timestamp(), unit).to_string())
 }
 
+/// 按秒或毫秒设置调整时间戳的输出单位。
 fn scale_timestamp(timestamp: i64, unit: bool) -> i64 {
     if unit { timestamp * 1000 } else { timestamp }
 }

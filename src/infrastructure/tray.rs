@@ -1,6 +1,5 @@
 //! System tray icon, menu state, and menu event handling.
 
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use log::info;
@@ -8,15 +7,19 @@ use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuIt
 use tray_icon::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 
 use crate::assets::load_tray_icon;
-use crate::features::file_preview::ocr::OcrService;
-use crate::features::text_translation::translator::TranslationService;
-use crate::settings::{AppSettings, SettingsStore};
+use crate::settings::AppSettings;
 
 const COPY_TIMESTAMP_MENU_ID: &str = "copy_timestamp_enabled";
 const CLIPBOARD_HISTORY_MENU_ID: &str = "clipboard_history_enabled";
-const SCREENSHOT_MENU_ID: &str = "screenshot_enabled";
 const TEXT_TRANSLATION_MENU_ID: &str = "text_translation_enabled";
 const QUIT_MENU_ID: &str = "quit";
+
+/// 托盘只发出用户动作，配置保存和服务更新交给应用控制器。
+pub enum TrayAction {
+    CopyTimestamp(bool),
+    ClipboardHistory(bool),
+    TextTranslation(bool),
+}
 
 /// Keeps tray UI handles alive and exposes menu items needed by the event pump.
 pub struct TrayState {
@@ -24,7 +27,6 @@ pub struct TrayState {
     pub menu: Menu,
     copy_timestamp_item: CheckMenuItem,
     clipboard_history_item: CheckMenuItem,
-    screenshot_item: CheckMenuItem,
     text_translation_item: CheckMenuItem,
 }
 
@@ -32,35 +34,33 @@ pub struct TrayState {
 pub struct TrayMenuHandles {
     copy_timestamp_item: CheckMenuItem,
     clipboard_history_item: CheckMenuItem,
-    screenshot_item: CheckMenuItem,
     text_translation_item: CheckMenuItem,
 }
 
 impl TrayState {
+    /// 复制托盘菜单句柄，供应用控制器同步勾选状态。
     pub fn menu_handles(&self) -> TrayMenuHandles {
         TrayMenuHandles {
             copy_timestamp_item: self.copy_timestamp_item.clone(),
             clipboard_history_item: self.clipboard_history_item.clone(),
-            screenshot_item: self.screenshot_item.clone(),
             text_translation_item: self.text_translation_item.clone(),
         }
     }
 }
 
 impl TrayMenuHandles {
+    /// 根据实际生效的配置更新托盘菜单勾选状态。
     pub fn sync_from_settings(&self, settings: &AppSettings) {
         self.copy_timestamp_item
             .set_checked(settings.copy_timestamp.enabled);
         self.clipboard_history_item
             .set_checked(settings.clipboard_history.enabled);
-        self.screenshot_item
-            .set_checked(settings.screenshot.enabled);
         self.text_translation_item
             .set_checked(settings.text_translation.enabled);
     }
 }
 
-/// Creates the tray icon and initializes menu check states from settings.
+/// 创建托盘图标与菜单，并设置功能开关的初始状态。
 pub fn init_tray_icon(settings: &AppSettings) -> TrayState {
     let tray_menu = Menu::new();
 
@@ -81,15 +81,6 @@ pub fn init_tray_icon(settings: &AppSettings) -> TrayState {
         None,
     );
     tray_menu.append(&clipboard_history_item).unwrap();
-
-    let screenshot_item = CheckMenuItem::with_id(
-        SCREENSHOT_MENU_ID,
-        "截图快捷键 - Alt+Shift+Z",
-        true,
-        settings.screenshot.enabled,
-        None,
-    );
-    tray_menu.append(&screenshot_item).unwrap();
 
     let text_translation_item = CheckMenuItem::with_id(
         TEXT_TRANSLATION_MENU_ID,
@@ -119,27 +110,20 @@ pub fn init_tray_icon(settings: &AppSettings) -> TrayState {
         menu: tray_menu,
         copy_timestamp_item,
         clipboard_history_item,
-        screenshot_item,
         text_translation_item,
     }
 }
 
-/// Polls tray menu events from the Slint event loop and persists setting changes.
+/// 轮询托盘事件，将显示主页和功能开关动作交给调用方。
 pub fn start_tray_event_pump(
     tray_state: &TrayState,
-    settings: Arc<Mutex<AppSettings>>,
-    settings_store: SettingsStore,
-    translation_service: Arc<TranslationService>,
-    ocr_service: Arc<OcrService>,
     show_home_window: impl Fn() + 'static,
-    on_settings_applied: impl Fn(&AppSettings) + 'static,
+    on_action: impl Fn(TrayAction) + 'static,
 ) -> slint::Timer {
     let tray_timer = slint::Timer::default();
     let copy_timestamp_item = tray_state.copy_timestamp_item.clone();
     let clipboard_history_item = tray_state.clipboard_history_item.clone();
-    let screenshot_item = tray_state.screenshot_item.clone();
     let text_translation_item = tray_state.text_translation_item.clone();
-    let tray_menu_handles = tray_state.menu_handles();
 
     tray_timer.start(
         slint::TimerMode::Repeated,
@@ -159,22 +143,16 @@ pub fn start_tray_event_pump(
             while let Ok(event) = MenuEvent::receiver().try_recv() {
                 info!("menu event: {event:?}");
 
-                let updated_settings = if event.id.as_ref() == COPY_TIMESTAMP_MENU_ID {
-                    update_settings_snapshot(&settings, |settings| {
-                        settings.copy_timestamp.enabled = copy_timestamp_item.is_checked();
-                    })
+                let action = if event.id.as_ref() == COPY_TIMESTAMP_MENU_ID {
+                    Some(TrayAction::CopyTimestamp(copy_timestamp_item.is_checked()))
                 } else if event.id.as_ref() == CLIPBOARD_HISTORY_MENU_ID {
-                    update_settings_snapshot(&settings, |settings| {
-                        settings.clipboard_history.enabled = clipboard_history_item.is_checked();
-                    })
-                } else if event.id.as_ref() == SCREENSHOT_MENU_ID {
-                    update_settings_snapshot(&settings, |settings| {
-                        settings.screenshot.enabled = screenshot_item.is_checked();
-                    })
+                    Some(TrayAction::ClipboardHistory(
+                        clipboard_history_item.is_checked(),
+                    ))
                 } else if event.id.as_ref() == TEXT_TRANSLATION_MENU_ID {
-                    update_settings_snapshot(&settings, |settings| {
-                        settings.text_translation.enabled = text_translation_item.is_checked();
-                    })
+                    Some(TrayAction::TextTranslation(
+                        text_translation_item.is_checked(),
+                    ))
                 } else if event.id.as_ref() == QUIT_MENU_ID {
                     info!("quit application");
                     request_application_quit();
@@ -182,21 +160,8 @@ pub fn start_tray_event_pump(
                 } else {
                     None
                 };
-
-                if let Some(settings) = updated_settings {
-                    save_settings(&settings_store, &settings);
-                    tray_menu_handles.sync_from_settings(&settings);
-                    translation_service.apply_settings(
-                        &settings.text_translation,
-                        settings.ai_backend,
-                        &settings.tencent_cloud,
-                    );
-                    ocr_service.apply_settings(
-                        settings.image_recognition_model_path(),
-                        settings.ai_backend,
-                        &settings.tencent_cloud,
-                    );
-                    on_settings_applied(&settings);
+                if let Some(action) = action {
+                    on_action(action);
                 }
             }
         },
@@ -204,21 +169,7 @@ pub fn start_tray_event_pump(
     tray_timer
 }
 
-fn update_settings_snapshot(
-    settings: &Arc<Mutex<AppSettings>>,
-    update: impl FnOnce(&mut AppSettings),
-) -> Option<AppSettings> {
-    let mut settings = settings.lock().ok()?;
-    update(&mut settings);
-    Some(settings.clone())
-}
-
-fn save_settings(settings_store: &SettingsStore, settings: &AppSettings) {
-    if let Err(err) = settings_store.save(settings) {
-        log::error!("save settings failed: {err}");
-    }
-}
-
+/// 请求退出事件循环，并启动后台兜底退出以防监听线程阻碍结束。
 fn request_application_quit() {
     std::thread::Builder::new()
         .name("quit-fallback".into())

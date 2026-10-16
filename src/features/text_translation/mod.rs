@@ -3,3 +3,5 @@
 pub mod language;
 pub mod translator;
 pub mod window;
+
+pub mod requests;

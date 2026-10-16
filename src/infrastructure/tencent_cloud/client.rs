@@ -1,6 +1,5 @@
-use std::{path::Path, time::Duration};
+use std::time::Duration;
 
-use base64::Engine;
 use chrono::{TimeZone, Utc};
 use regex::Regex;
 use serde_json::{Value, json};
@@ -14,10 +13,6 @@ const TMT_HOST: &str = "tmt.tencentcloudapi.com";
 const TMT_SERVICE: &str = "tmt";
 const TMT_VERSION: &str = "2018-03-21";
 const TMT_ACTION_TEXT_TRANSLATE: &str = "TextTranslate";
-const OCR_HOST: &str = "ocr.tencentcloudapi.com";
-const OCR_SERVICE: &str = "ocr";
-const OCR_VERSION: &str = "2018-11-19";
-const OCR_ACTION_GENERAL_BASIC: &str = "GeneralAccurateOCR";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
 const HTTP_ERROR_BODY_LIMIT: usize = 512;
 
@@ -26,6 +21,7 @@ pub enum TencentTranslationDirection {
     EnToZh,
 }
 
+/// 解析腾讯云翻译响应，提取译文或返回接口错误。
 pub fn parse_text_translate_response(body: &str) -> Result<String, String> {
     let response = parse_response(body)?;
     if let Some(error) = response_error(&response) {
@@ -39,24 +35,7 @@ pub fn parse_text_translate_response(body: &str) -> Result<String, String> {
         .ok_or_else(|| "Tencent TextTranslate response missing TargetText".to_string())
 }
 
-pub fn parse_ocr_response(body: &str) -> Result<String, String> {
-    let response = parse_response(body)?;
-    if let Some(error) = response_error(&response) {
-        return Err(error);
-    }
-
-    let detections = response
-        .get("TextDetections")
-        .and_then(Value::as_array)
-        .ok_or_else(|| "Tencent OCR response missing TextDetections".to_string())?;
-    let lines = detections
-        .iter()
-        .filter_map(|detection| detection.get("DetectedText").and_then(Value::as_str))
-        .collect::<Vec<_>>();
-
-    Ok(lines.join("\n"))
-}
-
+/// 组装翻译请求参数，签名调用腾讯云 TMT 并解析响应。
 pub fn translate_text(
     credentials: &TencentCloudSettings,
     direction: TencentTranslationDirection,
@@ -85,29 +64,7 @@ pub fn translate_text(
     parse_text_translate_response(&body)
 }
 
-pub fn recognize_image(
-    credentials: &TencentCloudSettings,
-    image_path: &Path,
-) -> Result<String, String> {
-    let image = std::fs::read(image_path)
-        .map_err(|err| format!("read image for Tencent OCR failed: {err}"))?;
-    let image_base64 = base64::engine::general_purpose::STANDARD.encode(image);
-    let payload = json!({
-        "ImageBase64": image_base64,
-    })
-    .to_string();
-
-    let body = send_request(
-        credentials,
-        OCR_HOST,
-        OCR_SERVICE,
-        OCR_ACTION_GENERAL_BASIC,
-        OCR_VERSION,
-        &payload,
-    )?;
-    parse_ocr_response(&body)
-}
-
+/// 解析 JSON 响应并取出腾讯云统一的 Response 对象。
 fn parse_response(body: &str) -> Result<Value, String> {
     let value: Value = serde_json::from_str(body)
         .map_err(|err| format!("parse Tencent Cloud response failed: {err}"))?;
@@ -117,6 +74,7 @@ fn parse_response(body: &str) -> Result<Value, String> {
         .ok_or_else(|| "Tencent Cloud response missing Response".to_string())
 }
 
+/// 提取腾讯云错误码和错误信息，没有错误时返回空值。
 fn response_error(response: &Value) -> Option<String> {
     let error = response.get("Error")?;
     let code = error
@@ -131,6 +89,7 @@ fn response_error(response: &Value) -> Option<String> {
     }
 }
 
+/// 校验凭据，生成 TC3 签名并发送带超时限制的 API 请求。
 fn send_request(
     credentials: &TencentCloudSettings,
     host: &str,
@@ -192,6 +151,7 @@ fn send_request(
     }
 }
 
+/// 整理 HTTP 错误，优先返回腾讯云错误码并避免泄露完整响应。
 fn format_http_status_error(status: u16, body: &str) -> String {
     if let Ok(response) = parse_response(body) {
         if let Some(error) = response.get("Error") {
@@ -221,6 +181,7 @@ fn format_http_status_error(status: u16, body: &str) -> String {
     }
 }
 
+/// 脱敏并截断非标准错误内容，避免密钥及超长响应进入错误信息。
 fn sanitize_http_error_body(body: &str) -> String {
     let mut sanitized = body.replace(['\r', '\n'], " ");
     for pattern in [
@@ -249,6 +210,7 @@ mod tests {
     use super::*;
 
     #[test]
+    /// 验证成功响应可正确提取目标译文。
     fn parse_text_translate_response_extracts_target_text() {
         let body = r#"{
             "Response": {
@@ -261,25 +223,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_ocr_response_joins_detected_text_in_order() {
-        let body = r#"{
-            "Response": {
-                "TextDetections": [
-                    { "DetectedText": "first" },
-                    { "DetectedText": "second" },
-                    { "DetectedText": "third" }
-                ],
-                "RequestId": "request-id"
-            }
-        }"#;
-
-        assert_eq!(
-            parse_ocr_response(body),
-            Ok("first\nsecond\nthird".to_string())
-        );
-    }
-
-    #[test]
+    /// 验证翻译失败时保留腾讯云错误码便于定位问题。
     fn text_translate_error_response_returns_error_containing_code() {
         let body = r#"{
             "Response": {
@@ -296,22 +240,7 @@ mod tests {
     }
 
     #[test]
-    fn ocr_error_response_returns_error_containing_code() {
-        let body = r#"{
-            "Response": {
-                "Error": {
-                    "Code": "FailedOperation.OcrFailed",
-                    "Message": "ocr failed"
-                },
-                "RequestId": "request-id"
-            }
-        }"#;
-
-        let err = parse_ocr_response(body).expect_err("error response should fail");
-        assert!(err.contains("FailedOperation.OcrFailed"));
-    }
-
-    #[test]
+    /// 验证 HTTP 错误只提取必要信息而不回显完整响应。
     fn http_error_formatter_extracts_tencent_error_without_full_body() {
         let body = r#"{
             "Response": {
@@ -330,6 +259,7 @@ mod tests {
     }
 
     #[test]
+    /// 验证异常响应中的敏感字段被脱敏且长度受限。
     fn http_error_formatter_sanitizes_and_caps_non_tencent_body() {
         let body = format!(
             "line1\nAuthorization: should-not-be-echoed SecretId=abc SecretKey=def Signature=ghi\n{}",

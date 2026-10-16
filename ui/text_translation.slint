@@ -2,6 +2,9 @@ import { TextEdit } from "std-widgets.slint";
 import "../assets/font/AlibabaPuHuiTi-3-55-Regular.ttf";
 
 export component TextTranslationWindow inherits Window {
+    // 将页面逻辑尺寸提供给原生窗口，确保首次显示前准确居中。
+    out property <length> initial_width: root.width;
+    out property <length> initial_height: root.height;
     width: 620px;
     height: 520px;
     always-on-top: true;

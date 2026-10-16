@@ -1,28 +1,15 @@
 //! Slint settings window setup and runtime integration.
 
-use std::path::PathBuf;
-use std::rc::Rc;
-use std::sync::{Arc, Mutex};
-
 use slint::{CloseRequestResponse, ComponentHandle};
 
 use crate::SettingsWindow;
-use crate::features::file_preview::ocr::OcrService;
-use crate::features::text_translation::translator::TranslationService;
-use crate::infrastructure::tray::TrayMenuHandles;
-use crate::platform::dialog::{open_folder_dialog, show_message_box};
-use crate::platform::window::{activate_slint_window, center_window};
-use crate::settings::{
-    AiBackend, AppSettings, SettingsStore, TencentCloudSettings, TextTranslationSettings,
-};
+use crate::platform::dialog::show_message_box;
+use crate::platform::window::show_centered_window;
+use crate::settings::{AppSettings, TencentCloudSettings, TextTranslationSettings};
 
+/// 创建设置页面；页面只收集输入，保存与服务更新由应用控制器负责。
 pub fn init_settings_window(
-    settings: Arc<Mutex<AppSettings>>,
-    settings_store: SettingsStore,
-    translation_service: Arc<TranslationService>,
-    ocr_service: Arc<OcrService>,
-    tray_menu_handles: TrayMenuHandles,
-    on_settings_applied: Rc<dyn Fn(&AppSettings)>,
+    apply_settings: impl Fn(AppSettings) -> Result<(), String> + 'static,
 ) -> SettingsWindow {
     let window = SettingsWindow::new().unwrap();
 
@@ -30,136 +17,29 @@ pub fn init_settings_window(
         .window()
         .on_close_requested(|| CloseRequestResponse::HideWindow);
 
-    {
-        let weak_window = window.as_weak();
-        let settings = Arc::clone(&settings);
-        let settings_store = settings_store.clone();
-        let translation_service = Arc::clone(&translation_service);
-        let ocr_service = Arc::clone(&ocr_service);
-        let tray_menu_handles = tray_menu_handles.clone();
-        let on_settings_applied = Rc::clone(&on_settings_applied);
-        window.on_browse_image_recognition_model_dir(move || {
-            let Some(path) = open_folder_dialog("选择图像识别模型目录") else {
-                return;
-            };
+    let weak_window = window.as_weak();
+    window.on_apply_settings(move || {
+        let Some(window) = weak_window.upgrade() else {
+            return;
+        };
+        let mut updated_settings = AppSettings::default();
+        updated_settings.copy_timestamp.enabled = window.get_copy_timestamp_enabled();
+        updated_settings.clipboard_history.enabled = window.get_clipboard_history_enabled();
+        updated_settings.text_translation = TextTranslationSettings {
+            enabled: window.get_text_translation_enabled(),
+            debounce_seconds: debounce_seconds_from_string(
+                &window.get_text_translation_debounce_seconds(),
+            ),
+        };
+        updated_settings.tencent_cloud = TencentCloudSettings {
+            secret_id: window.get_tencent_secret_id().trim().to_string(),
+            secret_key: window.get_tencent_secret_key().trim().to_string(),
+        };
 
-            let selected = path.to_string_lossy().to_string();
-            if let Some(window) = weak_window.upgrade() {
-                window.set_image_recognition_model_dir(selected.into());
-                apply_from_window(
-                    &window,
-                    &settings,
-                    &settings_store,
-                    &translation_service,
-                    &ocr_service,
-                    &tray_menu_handles,
-                    &on_settings_applied,
-                );
-            }
-        });
-    }
-
-    {
-        let weak_window = window.as_weak();
-        let settings = Arc::clone(&settings);
-        let settings_store = settings_store.clone();
-        let translation_service = Arc::clone(&translation_service);
-        let ocr_service = Arc::clone(&ocr_service);
-        let tray_menu_handles = tray_menu_handles.clone();
-        let on_settings_applied = Rc::clone(&on_settings_applied);
-        window.on_browse_text_translation_zh_to_en_model_dir(move || {
-            let Some(path) = open_folder_dialog("选择中译英模型目录") else {
-                return;
-            };
-
-            let selected = path.to_string_lossy().to_string();
-            if let Some(window) = weak_window.upgrade() {
-                window.set_text_translation_zh_to_en_model_dir(selected.into());
-                apply_from_window(
-                    &window,
-                    &settings,
-                    &settings_store,
-                    &translation_service,
-                    &ocr_service,
-                    &tray_menu_handles,
-                    &on_settings_applied,
-                );
-            }
-        });
-    }
-
-    {
-        let weak_window = window.as_weak();
-        let settings = Arc::clone(&settings);
-        let settings_store = settings_store.clone();
-        let translation_service = Arc::clone(&translation_service);
-        let ocr_service = Arc::clone(&ocr_service);
-        let tray_menu_handles = tray_menu_handles.clone();
-        let on_settings_applied = Rc::clone(&on_settings_applied);
-        window.on_browse_text_translation_en_to_zh_model_dir(move || {
-            let Some(path) = open_folder_dialog("选择英译中模型目录") else {
-                return;
-            };
-
-            let selected = path.to_string_lossy().to_string();
-            if let Some(window) = weak_window.upgrade() {
-                window.set_text_translation_en_to_zh_model_dir(selected.into());
-                apply_from_window(
-                    &window,
-                    &settings,
-                    &settings_store,
-                    &translation_service,
-                    &ocr_service,
-                    &tray_menu_handles,
-                    &on_settings_applied,
-                );
-            }
-        });
-    }
-
-    {
-        let weak_window = window.as_weak();
-        let settings = Arc::clone(&settings);
-        let translation_service = Arc::clone(&translation_service);
-        let ocr_service = Arc::clone(&ocr_service);
-        let tray_menu_handles = tray_menu_handles.clone();
-        let settings_store = settings_store.clone();
-        let on_settings_applied = Rc::clone(&on_settings_applied);
-        window.on_apply_settings(
-            move |copy_timestamp_enabled,
-                  clipboard_history_enabled,
-                  screenshot_enabled,
-                  text_translation_enabled,
-                  tencent_backend_enabled,
-                  tencent_secret_id,
-                  tencent_secret_key,
-                  image_recognition_model_dir,
-                  text_translation_debounce_seconds| {
-                let Some(window) = weak_window.upgrade() else {
-                    return;
-                };
-                apply_settings_snapshot(
-                    &settings,
-                    &settings_store,
-                    &translation_service,
-                    &ocr_service,
-                    &tray_menu_handles,
-                    &on_settings_applied,
-                    copy_timestamp_enabled,
-                    clipboard_history_enabled,
-                    screenshot_enabled,
-                    text_translation_enabled,
-                    tencent_backend_enabled,
-                    &tencent_secret_id,
-                    &tencent_secret_key,
-                    &image_recognition_model_dir,
-                    &window.get_text_translation_zh_to_en_model_dir(),
-                    &window.get_text_translation_en_to_zh_model_dir(),
-                    &text_translation_debounce_seconds,
-                );
-            },
-        );
-    }
+        if let Err(err) = apply_settings(updated_settings) {
+            show_message_box("保存失败", &format!("无法保存设置：{err}"));
+        }
+    });
 
     window.on_close_requested({
         let weak_window = window.as_weak();
@@ -173,69 +53,28 @@ pub fn init_settings_window(
     window
 }
 
+/// 填入当前配置，在显示前完成尺寸准备与居中定位。
 pub fn show_settings_window(window: &SettingsWindow, settings: &AppSettings) {
+    sync_settings_window(window, settings);
+    show_centered_window(
+        window,
+        slint::LogicalSize::new(window.get_initial_width(), window.get_initial_height()),
+    );
+}
+
+/// 同步页面数值而不改变窗口可见性，供托盘与设置入口共享使用。
+pub fn sync_settings_window(window: &SettingsWindow, settings: &AppSettings) {
     window.set_copy_timestamp_enabled(settings.copy_timestamp.enabled);
     window.set_clipboard_history_enabled(settings.clipboard_history.enabled);
-    window.set_screenshot_enabled(settings.screenshot.enabled);
     window.set_text_translation_enabled(settings.text_translation.enabled);
-    window.set_tencent_backend_enabled(settings.ai_backend == AiBackend::Local);
     window.set_tencent_secret_id(settings.tencent_cloud.secret_id.clone().into());
     window.set_tencent_secret_key(settings.tencent_cloud.secret_key.clone().into());
-    window.set_image_recognition_model_dir(
-        settings
-            .image_recognition_model_dir
-            .as_ref()
-            .map(|path| path.to_string_lossy().to_string())
-            .unwrap_or_default()
-            .into(),
-    );
-    window.set_text_translation_zh_to_en_model_dir(
-        settings
-            .text_translation
-            .zh_to_en_model_dir
-            .as_ref()
-            .map(|path| path.to_string_lossy().to_string())
-            .unwrap_or_default()
-            .into(),
-    );
-    window.set_text_translation_en_to_zh_model_dir(
-        settings
-            .text_translation
-            .en_to_zh_model_dir
-            .as_ref()
-            .map(|path| path.to_string_lossy().to_string())
-            .unwrap_or_default()
-            .into(),
-    );
-    window.set_text_translation_debounce_seconds(
-        settings
-            .text_translation
-            .debounce_seconds
-            .to_string()
-            .into(),
-    );
-    window.set_last_valid_text_translation_debounce_seconds(
-        settings
-            .text_translation
-            .debounce_seconds
-            .to_string()
-            .into(),
-    );
-
-    let _ = window.show();
-    center_window(window);
-    activate_slint_window(window);
+    let debounce_seconds = settings.text_translation.debounce_seconds.to_string();
+    window.set_text_translation_debounce_seconds(debounce_seconds.clone().into());
+    window.set_last_valid_text_translation_debounce_seconds(debounce_seconds.into());
 }
 
-fn path_from_string(path: &str) -> Option<PathBuf> {
-    let trimmed = path.trim();
-    if trimmed.is_empty() {
-        None
-    } else {
-        Some(PathBuf::from(trimmed))
-    }
-}
-
+/// 将输入解析为正整数秒数，无效值回退到一秒。
 fn debounce_seconds_from_string(value: &str) -> u64 {
     value
         .trim()
@@ -243,99 +82,4 @@ fn debounce_seconds_from_string(value: &str) -> u64 {
         .ok()
         .filter(|v| *v > 0)
         .unwrap_or(1)
-}
-
-fn apply_from_window(
-    window: &SettingsWindow,
-    settings: &Arc<Mutex<AppSettings>>,
-    settings_store: &SettingsStore,
-    translation_service: &Arc<TranslationService>,
-    ocr_service: &Arc<OcrService>,
-    tray_menu_handles: &TrayMenuHandles,
-    on_settings_applied: &Rc<dyn Fn(&AppSettings)>,
-) {
-    apply_settings_snapshot(
-        settings,
-        settings_store,
-        translation_service,
-        ocr_service,
-        tray_menu_handles,
-        on_settings_applied,
-        window.get_copy_timestamp_enabled(),
-        window.get_clipboard_history_enabled(),
-        window.get_screenshot_enabled(),
-        window.get_text_translation_enabled(),
-        window.get_tencent_backend_enabled(),
-        &window.get_tencent_secret_id(),
-        &window.get_tencent_secret_key(),
-        &window.get_image_recognition_model_dir(),
-        &window.get_text_translation_zh_to_en_model_dir(),
-        &window.get_text_translation_en_to_zh_model_dir(),
-        &window.get_text_translation_debounce_seconds(),
-    );
-}
-
-fn apply_settings_snapshot(
-    settings: &Arc<Mutex<AppSettings>>,
-    settings_store: &SettingsStore,
-    translation_service: &Arc<TranslationService>,
-    ocr_service: &Arc<OcrService>,
-    tray_menu_handles: &TrayMenuHandles,
-    on_settings_applied: &Rc<dyn Fn(&AppSettings)>,
-    copy_timestamp_enabled: bool,
-    clipboard_history_enabled: bool,
-    screenshot_enabled: bool,
-    text_translation_enabled: bool,
-    tencent_backend_enabled: bool,
-    tencent_secret_id: &str,
-    tencent_secret_key: &str,
-    image_recognition_model_dir: &str,
-    text_translation_zh_to_en_model_dir: &str,
-    text_translation_en_to_zh_model_dir: &str,
-    text_translation_debounce_seconds: &str,
-) {
-    let ai_backend = if tencent_backend_enabled {
-        AiBackend::Local
-    } else {
-        AiBackend::Tencent
-    };
-    let tencent_cloud = TencentCloudSettings {
-        secret_id: tencent_secret_id.trim().to_string(),
-        secret_key: tencent_secret_key.trim().to_string(),
-    };
-    let new_text_translation = TextTranslationSettings {
-        enabled: text_translation_enabled,
-        zh_to_en_model_dir: path_from_string(text_translation_zh_to_en_model_dir),
-        en_to_zh_model_dir: path_from_string(text_translation_en_to_zh_model_dir),
-        debounce_seconds: debounce_seconds_from_string(text_translation_debounce_seconds),
-    };
-    let updated_settings = {
-        let mut settings = settings.lock().unwrap();
-        settings.ai_backend = ai_backend;
-        settings.tencent_cloud = tencent_cloud;
-        settings.copy_timestamp.enabled = copy_timestamp_enabled;
-        settings.clipboard_history.enabled = clipboard_history_enabled;
-        settings.screenshot.enabled = screenshot_enabled;
-        settings.image_recognition_model_dir = path_from_string(image_recognition_model_dir);
-        settings.text_translation = new_text_translation;
-        settings.clone()
-    };
-
-    if let Err(err) = settings_store.save(&updated_settings) {
-        show_message_box("保存失败", &format!("无法保存设置：{err}"));
-        return;
-    }
-
-    tray_menu_handles.sync_from_settings(&updated_settings);
-    translation_service.apply_settings(
-        &updated_settings.text_translation,
-        updated_settings.ai_backend,
-        &updated_settings.tencent_cloud,
-    );
-    ocr_service.apply_settings(
-        updated_settings.image_recognition_model_path(),
-        updated_settings.ai_backend,
-        &updated_settings.tencent_cloud,
-    );
-    on_settings_applied(&updated_settings);
 }

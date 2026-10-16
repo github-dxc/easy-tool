@@ -1,31 +1,22 @@
-//! Slint window setup and presentation logic for clipboard history.
+//! 历史窗口绑定与数据展示，持久化操作统一交给历史服务。
 
-use std::path::{Path, PathBuf};
-use std::process::Command;
-use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
-
+use super::history::ClipboardHistoryItem;
+use super::service::ClipboardHistoryService;
+use crate::platform::window::{activate_slint_window, show_centered_window};
+use crate::{ClipboardHistoryRow, ClipboardHistoryWindow};
 use rdev::{EventType, Key, simulate};
 use slint::{ComponentHandle, Image, ModelRc, Rgba8Pixel, SharedPixelBuffer, VecModel};
+use std::rc::Rc;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
-use crate::features::clipboard_history::clipboard::put_clipboard_item;
-use crate::features::clipboard_history::history::{ClipboardHistory, ClipboardHistoryItem};
-use crate::features::clipboard_history::store::{delete_image_files, save_history};
-use crate::features::file_preview::window::is_supported_preview_file;
-use crate::platform::window::activate_slint_window;
-use crate::{ClipboardHistoryRow, ClipboardHistoryWindow};
-
-/// Builds the clipboard-history window and binds actions for paste/delete/open.
+/// 创建窗口并绑定取消、粘贴和删除操作。
 pub fn init_clipboard_history_window(
-    history: Arc<Mutex<ClipboardHistory>>,
-    history_dir: PathBuf,
+    service: Arc<ClipboardHistoryService>,
     suppress_shortcuts: Arc<AtomicBool>,
-    suppress_next_clipboard_history: Arc<Mutex<Option<ClipboardHistoryItem>>>,
 ) -> ClipboardHistoryWindow {
     let window = ClipboardHistoryWindow::new().unwrap();
-
     let weak = window.as_weak();
     window.on_cancel(move || {
         if let Some(ui) = weak.upgrade() {
@@ -34,167 +25,103 @@ pub fn init_clipboard_history_window(
     });
 
     let weak = window.as_weak();
-    let history_for_paste = Arc::clone(&history);
+    let paste_service = Arc::clone(&service);
     window.on_paste(move |index| {
-        let item = history_for_paste.lock().unwrap().get(index as usize);
-        if let Some(item) = item {
-            *suppress_next_clipboard_history.lock().unwrap() = Some(item.clone());
-            if let Err(err) = put_clipboard_item(&item) {
-                suppress_next_clipboard_history.lock().unwrap().take();
+        if index < 0 {
+            return;
+        }
+        match paste_service.prepare_paste(index as usize) {
+            Ok(true) => {}
+            Ok(false) => return,
+            Err(err) => {
                 log::error!("paste history item failed: {err}");
                 return;
             }
         }
-
         if let Some(ui) = weak.upgrade() {
             let _ = ui.hide();
         }
-
-        let suppress_shortcuts = Arc::clone(&suppress_shortcuts);
-        std::thread::spawn(move || {
-            suppress_shortcuts.store(true, Ordering::SeqCst);
-            std::thread::sleep(Duration::from_millis(120));
-            let _ = simulate(&EventType::KeyPress(Key::ControlLeft));
-            let _ = simulate(&EventType::KeyPress(Key::KeyV));
-            let _ = simulate(&EventType::KeyRelease(Key::KeyV));
-            let _ = simulate(&EventType::KeyRelease(Key::ControlLeft));
-            std::thread::sleep(Duration::from_millis(200));
-            suppress_shortcuts.store(false, Ordering::SeqCst);
-        });
+        simulate_paste(Arc::clone(&suppress_shortcuts));
     });
 
-    let history_for_delete = Arc::clone(&history);
-    let history_dir_for_delete = history_dir.clone();
     let weak = window.as_weak();
     window.on_delete_entry(move |index| {
         if index < 0 {
             return;
         }
-
-        let removed = {
-            let mut history = history_for_delete.lock().unwrap();
-            let mut next_history = history.clone();
-            let removed = next_history.remove(index as usize);
-            if removed.is_some() {
-                if let Err(err) = save_history(&history_dir_for_delete, &next_history) {
-                    log::error!("save clipboard history after delete failed: {err}");
-                    None
-                } else {
-                    *history = next_history;
-                    removed
+        match service.delete(index as usize) {
+            Ok(true) => {
+                if let Some(ui) = weak.upgrade() {
+                    refresh_with_selection(&ui, &service, index as usize);
                 }
-            } else {
-                None
             }
-        };
-        let Some(removed) = removed else {
-            return;
-        };
-
-        if let Some(path) = removed.image_path() {
-            delete_image_files(&history_dir_for_delete, vec![path.to_path_buf()]);
-        }
-
-        if let Some(ui) = weak.upgrade() {
-            refresh_clipboard_history_window_with_selection(
-                &ui,
-                &history_for_delete,
-                index as usize,
-            );
+            Ok(false) => {}
+            Err(err) => log::error!("delete clipboard history failed: {err}"),
         }
     });
-
-    let history_for_open = Arc::clone(&history);
-    window.on_open_entry(move |index| {
-        if index < 0 {
-            return;
-        }
-
-        let item = history_for_open.lock().unwrap().get(index as usize);
-        let Some(item) = item else {
-            return;
-        };
-
-        let preview_path = match preview_path_from_history_item(&item) {
-            Ok(Some(path)) => path,
-            Ok(None) => return,
-            Err(err) => {
-                log::error!("prepare history preview failed: {err}");
-                return;
-            }
-        };
-
-        if let Err(err) = open_standalone_file_preview(&preview_path) {
-            log::error!("open standalone file preview failed: {err}");
-        }
-    });
-
     window
 }
 
-fn preview_path_from_history_item(item: &ClipboardHistoryItem) -> Result<Option<PathBuf>, String> {
-    match item {
-        ClipboardHistoryItem::Files { paths } => {
-            let Some(path) = paths.first().filter(|_| paths.len() == 1).cloned() else {
-                return Ok(None);
-            };
-
-            Ok(is_supported_preview_file(&path).then_some(path))
-        }
-        ClipboardHistoryItem::Image { path, .. } => Ok(Some(path.clone())),
-        ClipboardHistoryItem::Text { .. } => Ok(None),
-    }
+/// 等窗口隐藏和快捷键松开后模拟粘贴；所有等待均发生在后台线程。
+fn simulate_paste(suppress_shortcuts: Arc<AtomicBool>) {
+    suppress_shortcuts.store(true, Ordering::SeqCst);
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(120));
+        let _ = simulate(&EventType::KeyPress(Key::ControlLeft));
+        let _ = simulate(&EventType::KeyPress(Key::KeyV));
+        let _ = simulate(&EventType::KeyRelease(Key::KeyV));
+        let _ = simulate(&EventType::KeyRelease(Key::ControlLeft));
+        std::thread::sleep(Duration::from_millis(200));
+        suppress_shortcuts.store(false, Ordering::SeqCst);
+    });
 }
 
-fn open_standalone_file_preview(path: &Path) -> Result<(), String> {
-    let exe_path =
-        std::env::current_exe().map_err(|err| format!("get current exe failed: {err}"))?;
-    Command::new(exe_path)
-        .arg(path)
-        .spawn()
-        .map_err(|err| format!("spawn file preview failed: {err}"))?;
-
-    Ok(())
-}
-
-/// Refreshes history rows before showing the window.
+/// 打开窗口前刷新内容，已显示时仅激活窗口。
 pub fn show_clipboard_history_window(
     window: &ClipboardHistoryWindow,
-    history: &Arc<Mutex<ClipboardHistory>>,
+    service: &ClipboardHistoryService,
 ) {
     if window.window().is_visible() {
         activate_slint_window(window);
         return;
     }
-
-    refresh_clipboard_history_window(window, history);
+    refresh_clipboard_history_window(window, service);
     let _ = window.show();
     activate_slint_window(window);
 }
 
-/// Rebuilds the Slint row model from the shared history store.
-pub fn refresh_clipboard_history_window(
+/// 从主页打开时刷新历史内容，并在显示前完成居中定位。
+pub fn show_centered_clipboard_history_window(
     window: &ClipboardHistoryWindow,
-    history: &Arc<Mutex<ClipboardHistory>>,
+    service: &ClipboardHistoryService,
 ) {
-    refresh_clipboard_history_window_with_selection(window, history, 0);
+    refresh_clipboard_history_window(window, service);
+    show_centered_window(
+        window,
+        slint::LogicalSize::new(window.get_initial_width(), window.get_initial_height()),
+    );
 }
 
-fn refresh_clipboard_history_window_with_selection(
+/// 使用历史快照重新构建窗口列表。
+pub fn refresh_clipboard_history_window(
     window: &ClipboardHistoryWindow,
-    history: &Arc<Mutex<ClipboardHistory>>,
+    service: &ClipboardHistoryService,
+) {
+    refresh_with_selection(window, service, 0);
+}
+
+/// 更新列表并保留指定选择位置，先释放历史锁再解码缩略图。
+fn refresh_with_selection(
+    window: &ClipboardHistoryWindow,
+    service: &ClipboardHistoryService,
     selected_index: usize,
 ) {
-    let rows = history
-        .lock()
-        .unwrap()
+    let rows = service
         .items()
         .into_iter()
         .map(row_from_item)
         .collect::<Vec<_>>();
-
     let selected_index = selected_index.min(rows.len().saturating_sub(1));
-
     if let Some(selected) = rows.get(selected_index) {
         window.set_current_kind(selected.kind.clone());
         window.set_current_detail(selected.detail.clone());
@@ -212,11 +139,11 @@ fn refresh_clipboard_history_window_with_selection(
         window.set_current_preview_width(0);
         window.set_current_preview_height(0);
     }
-
     window.set_entries(ModelRc::from(Rc::new(VecModel::from(rows))));
     window.set_selected_index(selected_index as i32);
 }
 
+/// 将历史条目转换为 Slint 列表行，并准备内容预览。
 fn row_from_item(item: ClipboardHistoryItem) -> ClipboardHistoryRow {
     let preview = preview_from_item(&item);
     let has_preview = preview.is_some();
@@ -235,6 +162,7 @@ fn row_from_item(item: ClipboardHistoryItem) -> ClipboardHistoryRow {
     }
 }
 
+/// 为图片条目或单个图片文件生成窗口内缩略图。
 fn preview_from_item(item: &ClipboardHistoryItem) -> Option<(Image, i32, i32)> {
     if let Some(image) = item.image_data() {
         return Some(image_preview(image));
@@ -253,6 +181,7 @@ fn preview_from_item(item: &ClipboardHistoryItem) -> Option<(Image, i32, i32)> {
     None
 }
 
+/// 将剪贴板像素数据转换为可缩放的 RGBA 图像。
 fn image_preview(image: arboard::ImageData<'static>) -> (Image, i32, i32) {
     let Some(source) = image::RgbaImage::from_raw(
         image.width as u32,
@@ -265,6 +194,7 @@ fn image_preview(image: arboard::ImageData<'static>) -> (Image, i32, i32) {
     rgba_preview(&source)
 }
 
+/// 按预览区域等比缩放图片，并转换为 Slint 图像缓冲。
 fn rgba_preview(source: &image::RgbaImage) -> (Image, i32, i32) {
     const MAX_PREVIEW_WIDTH: u32 = 400;
     const MAX_PREVIEW_HEIGHT: u32 = 300;
@@ -293,6 +223,7 @@ fn rgba_preview(source: &image::RgbaImage) -> (Image, i32, i32) {
     (Image::from_rgba8(buffer), width as i32, height as i32)
 }
 
+/// 依据扩展名判断文件是否属于可尝试预览的图片类型。
 fn is_image_file(path: &std::path::Path) -> bool {
     path.extension()
         .and_then(|extension| extension.to_str())

@@ -5,7 +5,6 @@ use std::cell::Cell;
 use std::time::Duration;
 
 use i_slint_backend_winit::WinitWindowAccessor;
-use log::info;
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use slint::ComponentHandle;
 use winit::dpi::PhysicalPosition;
@@ -20,80 +19,19 @@ thread_local! {
     static TASKBAR_OWNER_WINDOW: Cell<isize> = const { Cell::new(0) };
 }
 
-/// Moves the timestamp floating window to an absolute screen position.
+/// 设置时间转换浮窗的位置，坐标使用屏幕物理像素。
 pub fn set_position(time_window: &TimeTrans, x: f64, y: f64) {
     set_window_position(time_window, x, y);
 }
 
-/// Moves any Slint window to an absolute screen position.
+/// 通过原生窗口句柄设置 Slint 窗口的位置。
 pub fn set_window_position(window: &impl ComponentHandle, x: f64, y: f64) {
     window.window().with_winit_window(|winit_window| {
         winit_window.set_outer_position(PhysicalPosition::new(x, y));
     });
 }
 
-/// Allows the native window frame to be maximized and resized.
-pub fn make_window_resizable(window: &impl ComponentHandle) {
-    window.window().with_winit_window(|winit_window| {
-        winit_window.set_resizable(true);
-
-        #[cfg(target_os = "windows")]
-        if let Ok(handle) = winit_window.window_handle()
-            && let RawWindowHandle::Win32(win32_handle) = handle.as_raw()
-        {
-            let hwnd = win32_handle.hwnd.get() as isize;
-            enable_hwnd_resize_and_maximize(hwnd);
-        }
-    });
-}
-
-/// Re-applies resizable/maximize styles after the native window has been created.
-pub fn make_window_resizable_when_ready<T>(window: slint::Weak<T>, attempts_left: u8)
-where
-    T: ComponentHandle + 'static,
-{
-    slint::Timer::single_shot(TASKBAR_HIDE_RETRY_DELAY, move || {
-        let Some(window) = window.upgrade() else {
-            return;
-        };
-
-        make_window_resizable(&window);
-        if attempts_left > 0 {
-            make_window_resizable_when_ready(window.as_weak(), attempts_left - 1);
-        }
-    });
-}
-
-/// Returns the outer position of a Slint window in physical screen coordinates.
-pub fn window_position(window: &impl ComponentHandle) -> Option<(f64, f64)> {
-    let mut position = None;
-    window.window().with_winit_window(|winit_window| {
-        if let Ok(pos) = winit_window.outer_position() {
-            position = Some((pos.x as f64, pos.y as f64));
-        }
-    });
-    position
-}
-
-/// Returns the current cursor position in physical screen coordinates.
-#[cfg(target_os = "windows")]
-pub fn cursor_position() -> Option<(f64, f64)> {
-    unsafe {
-        use windows_sys::Win32::Foundation::POINT;
-        use windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos;
-
-        let mut point = POINT { x: 0, y: 0 };
-        (GetCursorPos(&mut point) != 0).then_some((point.x as f64, point.y as f64))
-    }
-}
-
-/// Non-Windows platforms do not expose cursor position here yet.
-#[cfg(not(target_os = "windows"))]
-pub fn cursor_position() -> Option<(f64, f64)> {
-    None
-}
-
-/// Returns the current monitor size for the timestamp window.
+/// 获取时间转换浮窗所在显示器的尺寸。
 pub fn display_size(time_window: &TimeTrans) -> Option<(f64, f64)> {
     let mut width = 0f64;
     let mut height = 0f64;
@@ -108,72 +46,68 @@ pub fn display_size(time_window: &TimeTrans) -> Option<(f64, f64)> {
     (width > 0f64 && height > 0f64).then_some((width, height))
 }
 
-/// Returns the current monitor size in physical pixels for any Slint window.
-pub fn window_monitor_size(window: &impl ComponentHandle) -> Option<(f64, f64)> {
-    let mut result = None;
-    window.window().with_winit_window(|winit_window| {
-        if let Some(monitor) = winit_window.current_monitor() {
-            let size = monitor.size();
-            result = Some((size.width as f64, size.height as f64));
-        }
-    });
-    result
+/// 等待隐藏的原生窗口就绪，先设置尺寸和居中位置，再显示并激活。
+pub fn show_centered_window<T>(window: &T, size: slint::LogicalSize)
+where
+    T: ComponentHandle + 'static,
+{
+    show_centered_window_with_style(window, size, false);
 }
 
-/// Centers the window on the current monitor.
-pub fn center_window(window: &(impl ComponentHandle + 'static)) {
-    center_window_when_ready(window.as_weak(), 5);
+/// 先应用隐藏任务栏图标的工具窗口样式，再居中显示浮窗。
+pub fn show_centered_tool_window<T>(window: &T, size: slint::LogicalSize)
+where
+    T: ComponentHandle + 'static,
+{
+    show_centered_window_with_style(window, size, true);
 }
 
-fn center_window_when_ready<T: ComponentHandle + 'static>(window: slint::Weak<T>, attempts_left: u8) {
-    slint::Timer::single_shot(TASKBAR_HIDE_RETRY_DELAY, move || {
-        let Some(window) = window.upgrade() else {
+/// 在原生窗口就绪后统一完成样式、尺寸、位置和显示，避免首次显示跳动。
+fn show_centered_window_with_style<T>(window: &T, size: slint::LogicalSize, tool_window: bool)
+where
+    T: ComponentHandle + 'static,
+{
+    let weak = window.as_weak();
+    // 原生窗口可能尚未创建，异步等待期间保持隐藏，避免默认位置被绘制出来。
+    if let Err(err) = slint::spawn_local(async move {
+        let Some(window) = weak.upgrade() else {
             return;
         };
-
-        if let Some((monitor_w, monitor_h)) = window_monitor_size(&window) {
-            let positioned = window.window().with_winit_window(|winit_window| {
-                let inner = winit_window.inner_size();
-                if inner.width == 0 || inner.height == 0 {
-                    return false;
-                }
-                let x = (monitor_w - inner.width as f64) / 2.0;
-                let y = (monitor_h - inner.height as f64) / 2.0;
-                winit_window.set_outer_position(PhysicalPosition::new(x, y));
-                true
-            });
-
-            if !positioned.unwrap_or(false) && attempts_left > 0 {
-                center_window_when_ready(window.as_weak(), attempts_left - 1);
+        let native = match window.window().winit_window().await {
+            Ok(native) => native,
+            Err(err) => {
+                log::error!("prepare centered window failed: {err}");
+                return;
             }
+        };
+        if tool_window {
+            hide_taskbar_icon(&window);
         }
-    });
-}
-
-#[cfg(target_os = "windows")]
-fn enable_hwnd_resize_and_maximize(hwnd: isize) {
-    unsafe {
-        use windows_sys::Win32::UI::WindowsAndMessaging::*;
-
-        let old_style = GetWindowLongPtrW(hwnd, GWL_STYLE) as u32;
-        let new_style = old_style | WS_MAXIMIZEBOX | WS_THICKFRAME;
-
-        if old_style != new_style {
-            SetWindowLongPtrW(hwnd, GWL_STYLE, new_style as isize);
-            SetWindowPos(
-                hwnd,
-                0,
-                0,
-                0,
-                0,
-                0,
-                SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
-            );
+        // 首次显示前原生窗口可能仍是默认大小，必须先应用页面给出的逻辑尺寸。
+        window.window().set_size(size);
+        if let Some(monitor) = native
+            .current_monitor()
+            .or_else(|| native.primary_monitor())
+        {
+            let origin = monitor.position();
+            let monitor_size = monitor.size();
+            // 使用包含边框的实际尺寸，并计入显示器原点，兼容多屏与负坐标。
+            let outer = native.outer_size();
+            let x = origin.x + ((monitor_size.width as i64 - outer.width as i64) / 2) as i32;
+            let y = origin.y + ((monitor_size.height as i64 - outer.height as i64) / 2) as i32;
+            native.set_outer_position(PhysicalPosition::new(x, y));
         }
+        if let Err(err) = window.show() {
+            log::error!("show centered window failed: {err}");
+            return;
+        }
+        activate_slint_window(&window);
+    }) {
+        log::error!("schedule centered window failed: {err}");
     }
 }
 
-/// Shows a Slint window after marking it as a tool window when possible.
+/// 以工具窗口形式显示组件，并在创建完成后重试隐藏任务栏图标。
 pub fn show_without_taskbar_icon<T>(window: &T) -> Result<(), slint::PlatformError>
 where
     T: ComponentHandle + 'static,
@@ -198,52 +132,7 @@ where
     result
 }
 
-/// Shows a tool-style Slint window that stays out of the taskbar and cannot be activated.
-pub fn show_without_taskbar_icon_or_activation<T>(window: &T) -> Result<(), slint::PlatformError>
-where
-    T: ComponentHandle + 'static,
-{
-    apply_taskbar_hidden_noactivate(window);
-
-    let result = window.show();
-    if result.is_ok() {
-        apply_taskbar_hidden_noactivate_when_ready(window.as_weak(), TASKBAR_HIDE_RETRY_ATTEMPTS);
-    }
-
-    result
-}
-
-fn apply_taskbar_hidden_noactivate_when_ready<T>(window: slint::Weak<T>, attempts_left: u8)
-where
-    T: ComponentHandle + 'static,
-{
-    slint::Timer::single_shot(TASKBAR_HIDE_RETRY_DELAY, move || {
-        let Some(window) = window.upgrade() else {
-            return;
-        };
-
-        if apply_taskbar_hidden_noactivate(&window) || attempts_left == 0 {
-            return;
-        }
-
-        apply_taskbar_hidden_noactivate_when_ready(window.as_weak(), attempts_left - 1);
-    });
-}
-
-fn apply_taskbar_hidden_noactivate(window: &impl ComponentHandle) -> bool {
-    let mut applied = false;
-    window.window().with_winit_window(|winit_window| {
-        if let Ok(handle) = winit_window.window_handle()
-            && let RawWindowHandle::Win32(win32_handle) = handle.as_raw()
-        {
-            let hwnd = win32_handle.hwnd.get() as isize;
-            apply_hwnd_taskbar_hidden_noactivate(hwnd);
-            applied = true;
-        }
-    });
-    applied
-}
-
+/// 等待原生窗口句柄就绪后隐藏任务栏图标，限制重试次数。
 fn hide_taskbar_icon_when_ready<T>(window: slint::Weak<T>, attempts_left: u8)
 where
     T: ComponentHandle + 'static,
@@ -261,7 +150,7 @@ where
     });
 }
 
-/// Marks any Slint window as a tool window so it stays out of the taskbar.
+/// 尝试取得原生句柄并隐藏任务栏图标，返回是否已经应用。
 pub fn hide_taskbar_icon(window: &impl ComponentHandle) -> bool {
     let mut applied = false;
     window.window().with_winit_window(|winit_window| {
@@ -277,40 +166,8 @@ pub fn hide_taskbar_icon(window: &impl ComponentHandle) -> bool {
     applied
 }
 
-/// Prevents a Slint window from becoming the active foreground window on click.
-pub fn prevent_window_activation(window: &impl ComponentHandle) -> bool {
-    let mut applied = false;
-    window.window().with_winit_window(|winit_window| {
-        if let Ok(handle) = winit_window.window_handle()
-            && let RawWindowHandle::Win32(win32_handle) = handle.as_raw()
-        {
-            let hwnd = win32_handle.hwnd.get() as isize;
-            info!("prevent window activation requested: hwnd={hwnd:#x}");
-            prevent_hwnd_activation(hwnd);
-            applied = true;
-        }
-    });
-    applied
-}
-
-pub fn prevent_window_activation_when_ready<T>(window: slint::Weak<T>, attempts_left: u8)
-where
-    T: ComponentHandle + 'static,
-{
-    slint::Timer::single_shot(TASKBAR_HIDE_RETRY_DELAY, move || {
-        let Some(window) = window.upgrade() else {
-            return;
-        };
-
-        if prevent_window_activation(&window) || attempts_left == 0 {
-            return;
-        }
-
-        prevent_window_activation_when_ready(window.as_weak(), attempts_left - 1);
-    });
-}
-
 #[cfg(target_os = "windows")]
+/// 关闭 Windows 窗口过渡动画；其他平台保持空操作。
 fn disable_window_transitions(hwnd: isize) {
     unsafe {
         use windows_sys::Win32::Graphics::Dwm::{
@@ -328,44 +185,11 @@ fn disable_window_transitions(hwnd: isize) {
 }
 
 #[cfg(not(target_os = "windows"))]
+/// 关闭 Windows 窗口过渡动画；其他平台保持空操作。
 fn disable_window_transitions(_hwnd: isize) {}
 
 #[cfg(target_os = "windows")]
-fn prevent_hwnd_activation(hwnd: isize) {
-    unsafe {
-        use windows_sys::Win32::UI::WindowsAndMessaging::*;
-
-        let old_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32;
-        let new_style = old_style | WS_EX_NOACTIVATE;
-        let was_visible = IsWindowVisible(hwnd) != 0;
-
-        if old_style != new_style {
-            SetWindowLongPtrW(hwnd, GWL_EXSTYLE, new_style as isize);
-        }
-
-        SetWindowPos(
-            hwnd,
-            0,
-            0,
-            0,
-            0,
-            0,
-            SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
-        );
-
-        let applied_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32;
-        info!(
-            "prevent window activation applied: hwnd={hwnd:#x}, visible={}, old_style={old_style:#010x}, new_style={new_style:#010x}, applied_style={applied_style:#010x}, has_noactivate={}",
-            was_visible,
-            applied_style & WS_EX_NOACTIVATE != 0
-        );
-    }
-}
-
-#[cfg(not(target_os = "windows"))]
-fn prevent_hwnd_activation(_hwnd: isize) {}
-
-#[cfg(target_os = "windows")]
+/// 设置原生窗口的工具窗口样式及所有者，使其不出现在任务栏。
 fn hide_hwnd_from_taskbar(hwnd: isize) {
     unsafe {
         use windows_sys::Win32::UI::WindowsAndMessaging::*;
@@ -404,61 +228,11 @@ fn hide_hwnd_from_taskbar(hwnd: isize) {
 }
 
 #[cfg(not(target_os = "windows"))]
+/// 设置原生窗口的工具窗口样式及所有者，使其不出现在任务栏。
 fn hide_hwnd_from_taskbar(_hwnd: isize) {}
 
 #[cfg(target_os = "windows")]
-fn apply_hwnd_taskbar_hidden_noactivate(hwnd: isize) {
-    unsafe {
-        use windows_sys::Win32::UI::WindowsAndMessaging::*;
-
-        disable_window_transitions(hwnd);
-
-        let old_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32;
-        let new_style = (old_style | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE) & !WS_EX_APPWINDOW;
-        let owner_hwnd = taskbar_owner_window();
-        let was_visible = IsWindowVisible(hwnd) != 0;
-
-        if was_visible {
-            ShowWindow(hwnd, SW_HIDE);
-        }
-
-        if owner_hwnd != 0 {
-            SetWindowLongPtrW(hwnd, GWLP_HWNDPARENT, owner_hwnd);
-        }
-
-        if old_style != new_style {
-            SetWindowLongPtrW(hwnd, GWL_EXSTYLE, new_style as isize);
-        }
-
-        SetWindowPos(
-            hwnd,
-            0,
-            0,
-            0,
-            0,
-            0,
-            SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
-        );
-
-        if was_visible {
-            ShowWindow(hwnd, SW_SHOWNA);
-        }
-
-        let applied_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32;
-        info!(
-            "apply noactivate taskbar-hidden style: hwnd={hwnd:#x}, owner={owner_hwnd:#x}, visible={}, old_style={old_style:#010x}, new_style={new_style:#010x}, applied_style={applied_style:#010x}, has_noactivate={}, has_toolwindow={}, has_appwindow={}",
-            was_visible,
-            applied_style & WS_EX_NOACTIVATE != 0,
-            applied_style & WS_EX_TOOLWINDOW != 0,
-            applied_style & WS_EX_APPWINDOW != 0
-        );
-    }
-}
-
-#[cfg(not(target_os = "windows"))]
-fn apply_hwnd_taskbar_hidden_noactivate(_hwnd: isize) {}
-
-#[cfg(target_os = "windows")]
+/// 取得当前 UI 线程共享的隐藏所有者窗口，首次调用时创建。
 fn taskbar_owner_window() -> isize {
     TASKBAR_OWNER_WINDOW.with(|owner| {
         let hwnd = owner.get();
@@ -473,6 +247,7 @@ fn taskbar_owner_window() -> isize {
 }
 
 #[cfg(target_os = "windows")]
+/// 创建隐藏原生窗口，作为工具窗口的所有者。
 fn create_taskbar_owner_window() -> isize {
     unsafe {
         use windows_sys::Win32::UI::WindowsAndMessaging::*;
@@ -497,11 +272,12 @@ fn create_taskbar_owner_window() -> isize {
 }
 
 #[cfg(target_os = "windows")]
+/// 将字符串转换为以空字符结束的 UTF-16，供 Windows API 使用。
 fn wide_null(value: &str) -> Vec<u16> {
     value.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
-/// Brings an existing Slint window to the foreground when supported by the platform.
+/// 获取 Slint 原生窗口句柄并请求将其激活到前台。
 pub fn activate_slint_window(window: &impl ComponentHandle) {
     window.window().with_winit_window(|winit_window| {
         winit_window.set_minimized(false);
@@ -518,26 +294,13 @@ pub fn activate_slint_window(window: &impl ComponentHandle) {
 }
 
 #[cfg(target_os = "windows")]
-/// Returns the foreground Win32 window handle for later paste activation.
-pub fn foreground_window_handle() -> Option<isize> {
-    let hwnd = unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow() };
-    (hwnd != 0).then_some(hwnd)
-}
-
-#[cfg(not(target_os = "windows"))]
-/// Non-Windows platforms currently do not expose a foreground-window handle.
-pub fn foreground_window_handle() -> Option<isize> {
-    None
-}
-
-#[cfg(target_os = "windows")]
-/// Brings a saved Win32 window handle back to the foreground.
+/// 尝试激活指定原生窗口；非 Windows 平台返回失败。
 pub fn activate_window(hwnd: isize) -> bool {
     unsafe { windows_sys::Win32::UI::WindowsAndMessaging::SetForegroundWindow(hwnd) != 0 }
 }
 
 #[cfg(not(target_os = "windows"))]
-/// Non-Windows platforms currently do not support foreground activation here.
+/// 尝试激活指定原生窗口；非 Windows 平台返回失败。
 pub fn activate_window(_hwnd: isize) -> bool {
     false
 }
