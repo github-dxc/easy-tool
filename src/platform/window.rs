@@ -179,7 +179,7 @@ where
     });
 }
 
-/// 尝试取得原生句柄并隐藏任务栏图标，返回是否已经应用。
+/// 隐藏任务栏图标并同步后端状态，确保激活、交互和重新显示后仍保持隐藏。
 pub fn hide_taskbar_icon(window: &impl ComponentHandle) -> bool {
     let mut applied = false;
     window.window().with_winit_window(|winit_window| {
@@ -189,6 +189,12 @@ pub fn hide_taskbar_icon(window: &impl ComponentHandle) -> bool {
             let hwnd = win32_handle.hwnd.get() as isize;
             disable_window_transitions(hwnd);
             hide_hwnd_from_taskbar(hwnd);
+            #[cfg(target_os = "windows")]
+            {
+                use winit::platform::windows::WindowExtWindows;
+                // 后端收到 TaskbarCreated 消息时会重新应用此值，必须与原生样式一致。
+                winit_window.set_skip_taskbar(true);
+            }
             applied = true;
         }
     });
@@ -221,8 +227,13 @@ fn disable_window_transitions(_hwnd: isize) {}
 /// 设置原生窗口的工具窗口样式及所有者，使其不出现在任务栏。
 fn hide_hwnd_from_taskbar(hwnd: isize) {
     unsafe {
+        use windows_sys::Win32::UI::Shell::SetWindowSubclass;
         use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
+        // 后端可能在显示、激活或更新窗口属性时重写扩展样式，持续保留工具窗口属性。
+        if SetWindowSubclass(hwnd, Some(taskbar_hidden_window_proc), 1, 0) == 0 {
+            log::error!("install taskbar-hidden window procedure failed");
+        }
         let old_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32;
         let new_style = (old_style | WS_EX_TOOLWINDOW) & !WS_EX_APPWINDOW;
         let owner_hwnd = taskbar_owner_window();
@@ -253,6 +264,36 @@ fn hide_hwnd_from_taskbar(hwnd: isize) {
         if was_visible {
             ShowWindow(hwnd, SW_SHOWNA);
         }
+    }
+}
+
+#[cfg(target_os = "windows")]
+/// 在原生样式更新时保留任务栏隐藏属性；不拦截激活和焦点，保证工具窗口可以编辑。
+unsafe extern "system" fn taskbar_hidden_window_proc(
+    hwnd: windows_sys::Win32::Foundation::HWND,
+    message: u32,
+    wparam: windows_sys::Win32::Foundation::WPARAM,
+    lparam: windows_sys::Win32::Foundation::LPARAM,
+    subclass_id: usize,
+    _reference: usize,
+) -> windows_sys::Win32::Foundation::LRESULT {
+    use windows_sys::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GWL_EXSTYLE, STYLESTRUCT, WM_NCDESTROY, WM_STYLECHANGING, WS_EX_APPWINDOW, WS_EX_TOOLWINDOW,
+    };
+    unsafe {
+        match message {
+            WM_STYLECHANGING if wparam as i32 == GWL_EXSTYLE && lparam != 0 => {
+                // Windows 在消息调用期间提供 STYLESTRUCT，只修正即将应用的任务栏属性。
+                let style = &mut *(lparam as *mut STYLESTRUCT);
+                style.styleNew = (style.styleNew | WS_EX_TOOLWINDOW) & !WS_EX_APPWINDOW;
+            }
+            WM_NCDESTROY => {
+                RemoveWindowSubclass(hwnd, Some(taskbar_hidden_window_proc), subclass_id);
+            }
+            _ => {}
+        }
+        DefSubclassProc(hwnd, message, wparam, lparam)
     }
 }
 
