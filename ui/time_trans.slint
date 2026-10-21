@@ -1,5 +1,22 @@
-import { LineEdit, VerticalBox, ComboBox, Button, Switch } from "std-widgets.slint";
+import { LineEdit, VerticalBox, Button, Switch } from "std-widgets.slint";
+import { CompactButton } from "components/compact.slint";
 import "../assets/font/AlibabaPuHuiTi-3-55-Regular.ttf";
+
+// 使用矢量图标避免字体缺字，两枚按钮总宽度与原复制按钮一致。
+component TimeActionButton inherits CompactButton {
+    in property <image> source;
+    icon: true;
+    width: 26px;
+    height: 25px;
+    Image {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        width: 16px;
+        height: 16px;
+        source: root.source;
+        opacity: root.enabled ? 1 : 0.35;
+    }
+}
 
 export component TimeTrans inherits Window {
     // 将页面逻辑尺寸提供给原生窗口，确保首次显示前准确居中。
@@ -24,6 +41,7 @@ export component TimeTrans inherits Window {
     in-out property <int> close_time: 3;
     out property <bool> has_hover: false;
     in-out property <bool> has_copy: false;
+    out property <bool> valid_result: root.result_value != "" && root.result_value != "Error";
     // 主页打开时持续显示当前时间；手动编辑或复制触发会退出实时模式。
     in-out property <bool> live_clock: false;
     in-out property <bool> auto_close: true;
@@ -33,6 +51,7 @@ export component TimeTrans inherits Window {
     // 定义回调函数（rust函数）
     callback update_result(input: string, unit: bool, timezone_index: int);
     callback copy_to_clipboard(text: string);
+    callback swap_values();
     callback close_window();
     callback move_window();
     callback last_timezone(i: int);
@@ -43,6 +62,9 @@ export component TimeTrans inherits Window {
     changed input_value => {
         if (root.input_value != "") {
             update_result(root.input_value, root.timestamp_unit, root.timezone_index);
+        } else {
+            root.result_value = "";
+            root.has_copy = false;
         }
     }
     changed timestamp_unit => {
@@ -58,9 +80,17 @@ export component TimeTrans inherits Window {
         }
     }
     changed result_value => {
+        // 复制成功只代表旧结果；任何结果变更都必须恢复复制图标。
+        root.has_copy = false;
         if (root.result_value != "Error" && root.result_value != "") {
             root.close_time = 3;
         }
+    }
+
+    copy_feedback := Timer {
+        interval: 1500ms;
+        running: root.has_copy;
+        triggered => { root.has_copy = false; }
     }
 
     // 实时模式只更新输入，沿用原有转换回调同步刷新时间戳结果。
@@ -202,18 +232,24 @@ export component TimeTrans inherits Window {
                     vertical-alignment: center;
                 }
 
-                Button {
-                    width: 55px;
-                    height: 25px;
-                    text: root.has_copy?"Done":"Copy";
-                    enabled: root.result_value != "";
-                    clicked => {
-                        copy_to_clipboard(root.result_value);
-                        root.has_copy = true;
+                HorizontalLayout {
+                    spacing: 3px;
+                    swap := TimeActionButton {
+                        source: @image-url("../assets/icons/swap.svg");
+                        accessible-label: "交换输入与结果";
+                        enabled: root.valid_result;
+                        clicked => { root.swap_values(); }
+                    }
+                    copy := TimeActionButton {
+                        source: root.has_copy ? @image-url("../assets/icons/check.svg") : @image-url("../assets/icons/copy.svg");
+                        accessible-label: root.has_copy ? "已复制" : "复制结果";
+                        enabled: root.valid_result;
+                        clicked => { root.copy_to_clipboard(root.result_value); }
                     }
                 }
             }
 
         }
+
     }
 }

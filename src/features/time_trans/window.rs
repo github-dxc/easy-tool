@@ -42,9 +42,20 @@ fn bind_visibility_callbacks(time_window: &TimeTrans) {
 
 /// 绑定结果复制操作，将转换后的文本写入剪贴板。
 fn bind_clipboard_callbacks(time_window: &TimeTrans) {
-    time_window.on_copy_to_clipboard(|text| {
-        let mut clipboard = Clipboard::new().unwrap();
-        clipboard.set_text(text.to_string()).unwrap();
+    let weak = time_window.as_weak();
+    time_window.on_copy_to_clipboard(move |text| {
+        let Some(ui) = weak.upgrade() else { return };
+        if !ui.get_valid_result() {
+            return;
+        }
+        // 写入成功后才显示勾选，剪贴板暂时被占用时保留重试入口。
+        match Clipboard::new().and_then(|mut clipboard| clipboard.set_text(text.to_string())) {
+            Ok(()) => ui.set_has_copy(true),
+            Err(err) => {
+                ui.set_has_copy(false);
+                log::error!("copy timestamp result failed: {err}");
+            }
+        }
     });
 }
 
@@ -59,10 +70,10 @@ fn bind_conversion_callbacks(time_window: &TimeTrans) {
         );
 
         if let Some(ui) = weak.upgrade() {
+            ui.set_has_copy(false);
             match result {
                 Ok(result_value) => {
                     ui.set_result_value(result_value.into());
-                    ui.set_has_copy(false);
                     if let Some(unit) = unit {
                         ui.set_timestamp_unit(unit);
                     }
@@ -72,6 +83,23 @@ fn bind_conversion_callbacks(time_window: &TimeTrans) {
                 }
             }
         }
+    });
+
+    let weak = time_window.as_weak();
+    time_window.on_swap_values(move || {
+        let Some(ui) = weak.upgrade() else { return };
+        if !ui.get_valid_result() {
+            return;
+        }
+        // 交换后退出实时模式，防止每秒刷新的当前时间覆盖刚填回的结果。
+        ui.set_live_clock(false);
+        ui.set_has_copy(false);
+        ui.set_input_value(ui.get_result_value());
+        ui.invoke_update_result(
+            ui.get_input_value(),
+            ui.get_timestamp_unit(),
+            ui.get_timezone_index(),
+        );
     });
 }
 
